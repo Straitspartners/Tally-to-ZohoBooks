@@ -1,90 +1,56 @@
 from django.shortcuts import render
-
-# Create your views here.
-# from rest_framework.decorators import api_view, permission_classes
-# from rest_framework.permissions import IsAuthenticated
-# from rest_framework.response import Response
-# from .serializers import LedgerSerializer
-# from .models import Ledger
-
-# @api_view(['POST'])
-# @permission_classes([IsAuthenticated])
-# def sync_ledgers(request):
-#     ledgers = request.data.get("ledgers", [])
-#     for entry in ledgers:
-#         Ledger.objects.update_or_create(
-#             user=request.user,
-#             name=entry.get("name"),
-#             defaults={
-#                 "parent": entry.get("parent"),
-#                 "phone": entry.get("phone")
-#             }
-#         )
-#     return Response({"message": f"{len(ledgers)} ledgers synced successfully."})
-
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework import status
+from rest_framework.authtoken.views import ObtainAuthToken
+from rest_framework.authtoken.models import Token
 from .models import Ledger
 from .serializers import LedgerSerializer
 import requests
 
 # Sync ledgers from Tally to Django
 @api_view(['POST'])
-@permission_classes([IsAuthenticated])  # Only authenticated users can access
+@permission_classes([IsAuthenticated])
 def sync_ledgers(request):
     """
-    This endpoint accepts data from the Tally sync agent and stores the ledger information in the database.
-    Expected data: 
-    {
-        "ledgers": [
-            {"name": "Ledger Name", "parent": "Parent Group", "phone": "1000.00"},
-            {"name": "Another Ledger", "parent": "Another Group", "phone": "2000.00"}
-        ]
-    }
+    Sync ledgers from Tally agent. Supports: customers, vendors, coa, items.
     """
-    # Data should come in a list under the "ledgers" key
-    ledgers = request.data.get("ledgers", [])
+    total_synced = 0
+    user = request.user
+    data = request.data
 
-    # If no ledgers are sent in the request, return an error
-    if not ledgers:
-        return Response({"error": "No ledgers provided in the request."}, status=status.HTTP_400_BAD_REQUEST)
+    for key in ['customers', 'vendors', 'coa', 'items']:  # ✅ Added 'items'
+        entries = data.get(key, [])
+        if isinstance(entries, list):
+            for entry in entries:
+                if not entry.get('name'):
+                    continue  # Skip invalid entries
 
-    # Process each ledger
-    for entry in ledgers:
-        # Check if required fields are present
-        if not entry.get('name'):
-            return Response({"error": "Ledger name is required."}, status=status.HTTP_400_BAD_REQUEST)
+                Ledger.objects.update_or_create(
+                    user=user,
+                    name=entry.get("name"),
+                    defaults={
+                        "parent": entry.get("parent", ""),
+                        "phone": entry.get("phone", None),
+                        "email": entry.get("email", None),
+                        "ledger_type": key[:-1] if key != "coa" else "coa"  # e.g., 'customers' -> 'customer'
+                    }
+                )
+                total_synced += 1
 
-        # Update or create the ledger in the database
-        Ledger.objects.update_or_create(
-            user=request.user,  # Link the ledger to the authenticated user
-            name=entry.get("name"),
-            defaults={
-                 "parent": entry.get("parent", ""),
-                 "phone": entry.get("phone", None),
-                 "email": entry.get("email", None)
-            }
-        )
+    if total_synced == 0:
+        return Response({"error": "No valid ledgers provided."}, status=status.HTTP_400_BAD_REQUEST)
 
-    # Return a success message
-    return Response({"message": f"{len(ledgers)} ledgers synced successfully."}, status=status.HTTP_200_OK)
+    return Response({"message": f"{total_synced} ledgers synced successfully."}, status=status.HTTP_200_OK)
 
 
-# Send the data to Zoho Books (Optional: Example function)
+# Optional: Send ledger data to Zoho Books
 def send_to_zoho(ledger_data, access_token):
-    """
-    Sends the ledger data to Zoho Books using Zoho's API.
-    """
-
     headers = {
-        "Authorization": f"Zoho-oauthtoken {access_token}"  # Zoho API authentication header
+        "Authorization": f"Zoho-oauthtoken {access_token}"
     }
-
-    # Zoho Books API endpoint to create chart of accounts
     url = "https://books.zoho.com/api/v3/chartofaccounts"
-
     payload = {
         "name": ledger_data.get("name"),
         "parent": ledger_data.get("parent", ""),
@@ -92,34 +58,23 @@ def send_to_zoho(ledger_data, access_token):
     }
 
     try:
-        # Sending the data to Zoho Books API
         response = requests.post(url, headers=headers, data=payload)
-        if response.status_code == 201:
-            return True
-        else:
-            return False
+        return response.status_code == 201
     except requests.exceptions.RequestException as e:
         print(f"Error sending data to Zoho Books: {e}")
         return False
 
 
-# Endpoint for syncing ledger data to Zoho Books (Optional)
+# Sync data from Django to Zoho Books
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def sync_to_zoho(request):
-    """
-    Syncs the ledgers from the Django database to Zoho Books.
-    """
-    # Fetch all ledgers associated with the authenticated user
     ledgers = Ledger.objects.filter(user=request.user)
-
-    # Assuming the Zoho Books API access token is stored in the environment
-    zoho_access_token = 'YOUR_ZOHO_OAUTH_ACCESS_TOKEN'  # Replace with dynamic token management
+    zoho_access_token = 'YOUR_ZOHO_OAUTH_ACCESS_TOKEN'  # TODO: Replace this with real token
 
     success_count = 0
     failed_count = 0
 
-    # Iterate over each ledger and push it to Zoho Books
     for ledger in ledgers:
         ledger_data = {
             "name": ledger.name,
@@ -127,28 +82,20 @@ def sync_to_zoho(request):
             "phone": ledger.phone
         }
 
-        # Send to Zoho
         if send_to_zoho(ledger_data, zoho_access_token):
             success_count += 1
         else:
             failed_count += 1
 
-    # Return a summary response
     return Response({
-        "message": f"Successfully synced {success_count} ledgers to Zoho Books. Failed to sync {failed_count} ledgers."
+        "message": f"Successfully synced {success_count} ledgers to Zoho Books. Failed: {failed_count}"
     }, status=status.HTTP_200_OK)
 
 
-
-from rest_framework.authtoken.views import ObtainAuthToken
-from rest_framework.authtoken.models import Token
-from rest_framework.response import Response
-from rest_framework import status
-
+# Custom Auth Token
 class CustomAuthToken(ObtainAuthToken):
     def post(self, request, *args, **kwargs):
-        serializer = self.serializer_class(data=request.data,
-                                           context={'request': request})
+        serializer = self.serializer_class(data=request.data, context={'request': request})
         if serializer.is_valid():
             user = serializer.validated_data['user']
             token, created = Token.objects.get_or_create(user=user)
