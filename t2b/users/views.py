@@ -26,8 +26,8 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework import status
-from .models import Ledger
-from .serializers import LedgerSerializer
+from .models import *
+from .serializers import *
 import requests
 
 # Sync ledgers from Tally to Django
@@ -61,15 +61,64 @@ def sync_ledgers(request):
         Ledger.objects.update_or_create(
             user=request.user,  # Link the ledger to the authenticated user
             name=entry.get("name"),
-            defaults={
-                 "parent": entry.get("parent", ""),
-                 "phone": entry.get("phone", None),
-                 "email": entry.get("email", None)
-            }
+            # defaults={
+            #      "parent": entry.get("parent", ""),
+            #      "phone": entry.get("phone", None),
+            #      "email": entry.get("email", None),
+            #      "address": entry.get("address", None) 
+            # }
+            defaults = {
+    "parent": entry.get("parent", ""),
+    "email": entry.get("email", None),
+    "address": entry.get("address", None),
+    "ledger_mobile": entry.get("ledger_mobile", None),
+    "website": entry.get("website", None),
+    "state_name": entry.get("state_name", None),
+    "country_name": entry.get("country_name", None),
+    "pincode": entry.get("pincode", None),
+}
+
         )
 
     # Return a success message
     return Response({"message": f"{len(ledgers)} ledgers synced successfully."}, status=status.HTTP_200_OK)
+
+
+# views.py (add below sync_ledgers)
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def sync_vendors(request):
+    """
+    Accepts and stores vendor information in the database.
+    Endpoint: /api/users/ledgers/vendors/
+    """
+    vendors = request.data.get("ledgers", [])
+
+    if not vendors:
+        return Response({"error": "No vendors provided in the request."}, status=status.HTTP_400_BAD_REQUEST)
+
+    for entry in vendors:
+        if not entry.get('name'):
+            return Response({"error": "Vendor name is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Update or create vendor
+        Vendor.objects.update_or_create(
+            user=request.user,
+            name=entry.get("name"),
+            defaults={
+                "parent": entry.get("parent", ""),
+                "email": entry.get("email", None),
+                "address": entry.get("address", None),
+                "ledger_mobile": entry.get("ledger_mobile", None),
+                "website": entry.get("website", None),
+                "state_name": entry.get("state_name", None),
+                "country_name": entry.get("country_name", None),
+                "pincode": entry.get("pincode", None),
+            }
+        )
+
+    return Response({"message": f"{len(vendors)} vendors synced successfully."}, status=status.HTTP_200_OK)
 
 
 # Send the data to Zoho Books (Optional: Example function)
