@@ -1,15 +1,22 @@
 from rest_framework import serializers
-from .models import Customer, Vendor
+from .models import Ledger
 
-class CustomerSerializer(serializers.ModelSerializer):
+class LedgerSerializer(serializers.ModelSerializer):
+    """
+    Serializer for Ledger model to convert data to/from JSON.
+    """
     class Meta:
-        model = Customer
-        fields = '__all__'
-        read_only_fields = ['user']
-
-class VendorSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = Vendor
-        fields = '__all__'
-        read_only_fields = ['user']
-
+        model = Ledger
+        fields = ['id', 'name', 'parent', 'phone', 'user', 'email']
+        
+    # Optional: You can add validation for fields here if necessary.
+    # def validate_closing_balance(self, value):
+    #     try:
+    #         return float(value)
+    #     except ValueError:
+    #         raise serializers.ValidationError("Closing balance must be a number.")
+        
+    def validate_name(self, value):
+        if not value:
+            raise serializers.ValidationError("Ledger name cannot be empty.")
+        return value
