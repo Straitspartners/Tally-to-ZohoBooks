@@ -39,7 +39,7 @@ class Ledger(models.Model):
         return f"{self.name} - {self.parent}"
 
     class Meta:
-        unique_together = ['user', 'name']
+        unique_together = ['user', 'name' , 'parent']
 
 
 # models.py
@@ -61,4 +61,4 @@ class Vendor(models.Model):
         return f"{self.name} - {self.parent}"
 
     class Meta:
-        unique_together = ['user', 'name']
+        unique_together = ['user', 'name' , 'parent']
