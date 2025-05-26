@@ -40,3 +40,8 @@ class VendorSerializer(serializers.ModelSerializer):
         if not value:
             raise serializers.ValidationError("Vendor name cannot be empty.")
         return value
+    
+class AccountSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Account
+        fields = ['account_name', 'account_code', 'account_type']

@@ -1,0 +1,413 @@
+import tkinter as tk
+from tkinter import messagebox
+import requests
+import xml.etree.ElementTree as ET
+import json
+import os
+import logging
+import re
+
+# ---------------- CONFIG ----------------
+
+CONFIG_PATH = "config.json"
+AUTH_TOKEN = None
+
+# DEFAULT_CONFIG = {
+#     "tally_url": "http://localhost:9000",
+#     "django_api_url": "https://tallytobooks-backend-bnezgff5eehsftfj.centralindia-01.azurewebsites.net/api/users/ledgers/",
+#     "django_url_vendors": "https://tallytobooks-backend-bnezgff5eehsftfj.centralindia-01.azurewebsites.net/api/users/vendors/",
+#     "auth_url": "https://tallytobooks-backend-bnezgff5eehsftfj.centralindia-01.azurewebsites.net/api/generate_token/"  # Django token endpoint
+# }
+
+DEFAULT_CONFIG = {
+    "tally_url": "http://localhost:9000",
+    "django_api_url": "http://127.0.0.1:8000/api/users/ledgers/",
+    "django_url_vendors": "http://127.0.0.1:8000/api/users/vendors/",
+    "auth_url": "http://127.0.0.1:8000/api/generate_token/"  # Django token endpoint
+}
+
+# ---------------- LOGGING ----------------
+
+logging.basicConfig(
+    filename='sync_gui.log',
+    level=logging.INFO,
+    format='%(asctime)s:%(levelname)s:%(message)s'
+)
+
+# ---------------- CONFIG LOADER ----------------
+
+def load_config():
+    if os.path.exists(CONFIG_PATH):
+        with open(CONFIG_PATH, "r") as file:
+            return json.load(file)
+    else:
+        with open(CONFIG_PATH, "w") as file:
+            json.dump(DEFAULT_CONFIG, file, indent=4)
+        return DEFAULT_CONFIG
+
+config = load_config()
+TALLY_URL = config["tally_url"]
+# DJANGO_API_URL = config["django_api_url"]
+AUTH_URL = config["auth_url"]
+DJANGO_API_URL_CUSTOMERS =config["django_api_url"]
+DJANGO_API_URL_VENDORS =config["django_url_vendors"]
+
+# ---------------- TOKEN HANDLER ----------------
+
+def get_token(username, password):
+    global AUTH_TOKEN
+    try:
+        response = requests.post(AUTH_URL, data={"username": username, "password": password})
+        response.raise_for_status()
+        token_data = response.json()
+        AUTH_TOKEN = token_data.get("token")
+        return True if AUTH_TOKEN else False
+    except requests.exceptions.RequestException as e:
+        logging.error(f"Login failed: {e}")
+        return False
+
+# ---------------- TALLY REQUEST ----------------
+
+TALLY_REQUEST_XML_CUSTOMERS = """
+<ENVELOPE>
+  <HEADER>
+    <VERSION>1</VERSION>
+    <TALLYREQUEST>Export</TALLYREQUEST>
+    <TYPE>Collection</TYPE>
+    <ID>Customer Ledgers</ID>
+  </HEADER>
+  <BODY>
+    <DESC>
+      <STATICVARIABLES>
+        <SVEXPORTFORMAT>$$SysName:XML</SVEXPORTFORMAT>
+      </STATICVARIABLES>
+      <TDL>
+        <TDLMESSAGE>
+          <COLLECTION NAME="Customer Ledgers" ISMODIFY="No">
+            <TYPE>Ledger</TYPE>
+            <FILTER>IsSundryDebtor</FILTER>
+            <FETCH>NAME, PARENT, EMAIL ,ADDRESS , LEDGERMOBILE, WEBSITE , LEDSTATENAME ,COUNTRYNAME , PINCODE</FETCH>
+          </COLLECTION>
+          <SYSTEM TYPE="Formulae" NAME="IsSundryDebtor">
+             $Parent = "Sundry Debtors"
+          </SYSTEM>
+        </TDLMESSAGE>
+      </TDL>
+    </DESC>
+  </BODY>
+</ENVELOPE>
+"""
+
+TALLY_REQUEST_XML_VENDORS = """
+<ENVELOPE>
+  <HEADER>
+    <VERSION>1</VERSION>
+    <TALLYREQUEST>Export</TALLYREQUEST>
+    <TYPE>Collection</TYPE>
+    <ID>Vendor Ledgers</ID>
+  </HEADER>
+  <BODY>
+    <DESC>
+      <STATICVARIABLES>
+        <SVEXPORTFORMAT>$$SysName:XML</SVEXPORTFORMAT>
+      </STATICVARIABLES>
+      <TDL>
+        <TDLMESSAGE>
+          <COLLECTION NAME="Vendor Ledgers" ISMODIFY="No">
+            <TYPE>Ledger</TYPE>
+            <FILTER>IsSundryCreditor</FILTER>
+            <FETCH>NAME, PARENT, EMAIL ,ADDRESS , LEDGERMOBILE, WEBSITE , LEDSTATENAME ,COUNTRYNAME , PINCODE</FETCH>
+          </COLLECTION>
+          <SYSTEM TYPE="Formulae" NAME="IsSundryCreditor">
+             $Parent = "Sundry Creditors"
+          </SYSTEM>
+        </TDLMESSAGE>
+      </TDL>
+    </DESC>
+  </BODY>
+</ENVELOPE>
+"""
+
+
+# ---------------- XML PARSER ----------------
+
+def clean_xml(xml_string):
+    xml_string = re.sub(r'&#\d+;', '', xml_string)  # Remove numeric character references
+    xml_string = re.sub(r'[\x00-\x08\x0B-\x0C\x0E-\x1F\x7F]', '', xml_string)  # Remove control chars
+    return xml_string
+
+# def parse_ledgers(xml_data):
+#     ledgers = []
+#     try:
+#         xml_data = clean_xml(xml_data)
+#         print(xml_data)
+#         root = ET.fromstring(xml_data)
+
+#         for ledger in root.findall(".//LEDGER"):
+#             name_elem = ledger.find(".//NAME")
+#             parent = ledger.findtext("PARENT")
+#             address_elems = ledger.findall(".//ADDRESS")
+#             address_lines = [elem.text.strip() for elem in address_elems if elem.text]
+#             address = ", ".join(address_lines)
+
+
+#             # Only include ledgers that belong to Sundry Debtors
+#             if parent and parent.strip().lower() == "sundry debtors":
+#                 ledgers.append({
+#                     "name": name_elem.text if name_elem is not None else "Unknown",
+#                     "parent": parent,
+#                     "phone": "",  # Not available in XML
+#                     "email": ""  , # Not available in XML
+#                     "address": address
+#                 })
+
+#         return ledgers
+#     except ET.ParseError as e:
+#         logging.error(f"XML Parse Error: {e}")
+#         with open("last_raw_tally.xml", "w", encoding="utf-8") as file:
+#             file.write(xml_data)
+#         raise Exception("Failed to parse Tally XML response.")
+# def parse_ledgers(xml_data):
+#     ledgers = []
+#     try:
+#         xml_data = clean_xml(xml_data)
+#         print(xml_data)
+#         root = ET.fromstring(xml_data)
+
+#         for ledger in root.findall(".//LEDGER"):
+#             # name = ledger.findtext("NAME", default="Unknown")
+#             name_elem = ledger.find(".//NAME")
+#             parent = ledger.findtext("PARENT", default="")
+#             email = ledger.findtext("EMAIL", default="")
+#             website = ledger.findtext("WEBSITE", default="")
+#             ledger_mobile = ledger.findtext("LEDGERMOBILE", default="")
+#             state_name = ledger.findtext("LEDSTATENAME", default="")
+#             country_name = ledger.findtext("COUNTRYNAME", default="")
+#             pincode = ledger.findtext("PINCODE", default="")
+
+#             address_elems = ledger.findall(".//ADDRESS")
+#             address_lines = [elem.text.strip() for elem in address_elems if elem.text]
+#             address = ", ".join(address_lines)
+
+#             # Only include ledgers that belong to Sundry Debtors
+#             if parent.strip().lower() == "sundry debtors":
+#                 ledgers.append({
+#                     # "name": name,
+#                     "name": name_elem.text if name_elem is not None else "Unknown",
+#                     "parent": parent,
+#                     "email": email,
+#                     "address": address,
+#                     "ledger_mobile": ledger_mobile,
+#                     "website": website,
+#                     "state_name": state_name,
+#                     "country_name": country_name,
+#                     "pincode": pincode
+#                 })
+
+#         return ledgers
+
+#     except ET.ParseError as e:
+#         logging.error(f"XML Parse Error: {e}")
+#         with open("last_raw_tally.xml", "w", encoding="utf-8") as file:
+#             file.write(xml_data)
+#         raise Exception("Failed to parse Tally XML response.")
+
+def parse_ledgers(xml_data, ledger_type="customer"):
+    ledgers = []
+    try:
+        xml_data = clean_xml(xml_data)
+        root = ET.fromstring(xml_data)
+
+        for ledger in root.findall(".//LEDGER"):
+            name_elem = ledger.find(".//NAME")
+            parent = ledger.findtext("PARENT", default="")
+            email = ledger.findtext("EMAIL", default="")
+            website = ledger.findtext("WEBSITE", default="")
+            ledger_mobile = ledger.findtext("LEDGERMOBILE", default="")
+            state_name = ledger.findtext("LEDSTATENAME", default="")
+            country_name = ledger.findtext("COUNTRYNAME", default="")
+            pincode = ledger.findtext("PINCODE", default="")
+
+            address_elems = ledger.findall(".//ADDRESS")
+            address_lines = [elem.text.strip() for elem in address_elems if elem.text]
+            address = ", ".join(address_lines)
+
+            if ledger_type == "customer" and parent.strip().lower() == "sundry debtors":
+                ledgers.append({
+                    "name": name_elem.text if name_elem is not None else "Unknown",
+                    "parent": parent,
+                    "email": email,
+                    "address": address,
+                    "ledger_mobile": ledger_mobile,
+                    "website": website,
+                    "state_name": state_name,
+                    "country_name": country_name,
+                    "pincode": pincode
+                })
+            elif ledger_type == "vendor" and parent.strip().lower() == "sundry creditors":
+                ledgers.append({
+                    "name": name_elem.text if name_elem is not None else "Unknown",
+                    "parent": parent,
+                    "email": email,
+                    "address": address,
+                    "ledger_mobile": ledger_mobile,
+                    "website": website,
+                    "state_name": state_name,
+                    "country_name": country_name,
+                    "pincode": pincode
+                })
+
+        return ledgers
+
+    except ET.ParseError as e:
+        logging.error(f"XML Parse Error: {e}")
+        with open("last_raw_tally.xml", "w", encoding="utf-8") as file:
+            file.write(xml_data)
+        raise Exception("Failed to parse Tally XML response.")
+
+
+# ---------------- TALLY SYNC ----------------
+
+def get_tally_data(tally_request_xml):
+    try:
+        response = requests.post(TALLY_URL, data=tally_request_xml)
+        response.raise_for_status()
+        return response.text
+    except requests.exceptions.RequestException as e:
+        logging.error(f"Tally connection failed: {e}")
+        raise Exception("Could not connect to Tally. Is it running and listening on port 9000?")
+
+
+# def send_to_django(ledgers):
+#     try:
+#         headers = {"Authorization": f"Token {AUTH_TOKEN}"}
+#         response = requests.post(DJANGO_API_URL, json={"ledgers": ledgers}, headers=headers)
+#         response.raise_for_status()
+#     except requests.exceptions.RequestException as e:
+#         logging.error(f"Error sending to Django: {e}")
+#         raise Exception("Failed to send data to server.")
+
+def send_customers_to_django(customers):
+    try:
+        headers = {"Authorization": f"Token {AUTH_TOKEN}"}
+        response = requests.post(DJANGO_API_URL_CUSTOMERS, json={"ledgers": customers}, headers=headers)
+        response.raise_for_status()
+    except requests.exceptions.RequestException as e:
+        logging.error(f"Error sending customers to Django: {e}")
+        raise Exception("Failed to send customers data to server.")
+
+def send_vendors_to_django(vendors):
+    try:
+        headers = {"Authorization": f"Token {AUTH_TOKEN}"}
+        response = requests.post(DJANGO_API_URL_VENDORS, json={"ledgers": vendors}, headers=headers)
+        response.raise_for_status()
+    except requests.exceptions.RequestException as e:
+        logging.error(f"Error sending vendors to Django: {e}")
+        raise Exception("Failed to send vendors data to server.")
+
+
+# ---------------- GUI LOGIC ----------------
+
+# def sync_data():
+#     try:
+#         status_label.config(text="Connecting to Tally...", fg="blue")
+#         root.update()
+
+#         xml_data = get_tally_data()
+#         ledgers = parse_ledgers(xml_data)
+#         if not ledgers:
+#             messagebox.showwarning("No Data", "No ledgers found in Tally.")
+#             status_label.config(text="No ledgers found.", fg="orange")
+#             return
+
+#         send_to_django(ledgers)
+#         messagebox.showinfo("Success", "Data synced successfully!")
+#         status_label.config(text="✅ Sync complete!", fg="green")
+
+#     except Exception as e:
+#         messagebox.showerror("Error", str(e))
+#         status_label.config(text=f"❌ {str(e)}", fg="red")
+
+def sync_data():
+    try:
+        status_label.config(text="Connecting to Tally...", fg="blue")
+        root.update()
+
+        # Fetch customers
+        xml_customers = get_tally_data(TALLY_REQUEST_XML_CUSTOMERS)
+        customers = parse_ledgers(xml_customers, ledger_type="customer")
+
+        # Fetch vendors
+        xml_vendors = get_tally_data(TALLY_REQUEST_XML_VENDORS)
+        vendors = parse_ledgers(xml_vendors, ledger_type="vendor")
+
+        if not customers and not vendors:
+            messagebox.showwarning("No Data", "No customers or vendors found in Tally.")
+            status_label.config(text="No ledgers found.", fg="orange")
+            return
+
+        if customers:
+            send_customers_to_django(customers)
+        if vendors:
+            send_vendors_to_django(vendors)
+
+        messagebox.showinfo("Success", "Customers and Vendors synced successfully!")
+        status_label.config(text="✅ Sync complete!", fg="green")
+
+    except Exception as e:
+        messagebox.showerror("Error", str(e))
+        status_label.config(text=f"❌ {str(e)}", fg="red")
+
+
+# ---------------- GUI SETUP ----------------
+
+root = tk.Tk()
+root.title("Tally to Django Sync Agent")
+root.geometry("400x260")
+root.resizable(False, False)
+
+title_label = tk.Label(root, text="Tally → Django Sync", font=("Arial", 16, "bold"))
+title_label.pack(pady=10)
+
+username_var = tk.StringVar()
+password_var = tk.StringVar()
+
+tk.Label(root, text="Username").pack()
+tk.Entry(root, textvariable=username_var).pack()
+
+tk.Label(root, text="Password").pack()
+tk.Entry(root, textvariable=password_var, show="*").pack()
+
+def login_and_sync():
+    username = username_var.get()
+    password = password_var.get()
+
+    if not username or not password:
+        messagebox.showwarning("Missing Fields", "Username and password are required.")
+        return
+
+    if not get_token(username, password):
+        messagebox.showerror("Login Failed", "Invalid credentials or server error.")
+        return
+
+    sync_data()
+
+sync_btn = tk.Button(root, text="Login & Sync", command=login_and_sync, font=("Arial", 12), bg="green", fg="white")
+sync_btn.pack(pady=20)
+
+status_label = tk.Label(root, text="", font=("Arial", 10))
+status_label.pack()
+
+footer = tk.Label(root, text="v1.0 - Developed by Your Company", font=("Arial", 8), fg="gray")
+footer.pack(side="bottom", pady=5)
+
+root.mainloop()
+
+
+
+
+# Installers :
+
+# pip install requests
+# pip install pyinstaller
+# pyinstaller --onefile --windowed python_agent.py

@@ -25,7 +25,7 @@ from django.shortcuts import render
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
-from rest_framework import status
+from rest_framework import status,permissions
 from .models import *
 from .serializers import *
 import requests
@@ -120,6 +120,31 @@ def sync_vendors(request):
 
     return Response({"message": f"{len(vendors)} vendors synced successfully."}, status=status.HTTP_200_OK)
 
+from rest_framework.views import APIView
+class AccountSyncView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        accounts_data = request.data.get("accounts", [])
+        created = []
+        errors = []
+
+        for account_data in accounts_data:
+            serializer = AccountSerializer(data=account_data)
+            if serializer.is_valid():
+                # Avoid duplicates using account_code
+                obj, created_flag = Account.objects.update_or_create(
+                    account_code=account_data["account_code"],
+                    defaults=serializer.validated_data
+                )
+                created.append(obj.account_code)
+            else:
+                errors.append(serializer.errors)
+
+        return Response({
+            "created": created,
+            "errors": errors
+        }, status=status.HTTP_201_CREATED if not errors else status.HTTP_207_MULTI_STATUS)
 
 # Send the data to Zoho Books (Optional: Example function)
 def send_to_zoho(ledger_data, access_token):
