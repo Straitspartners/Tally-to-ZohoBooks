@@ -3,3 +3,4 @@ from .models import *
 
 admin.site.register(Ledger)
 admin.site.register(Vendor)
+admin.site.register(Account)
