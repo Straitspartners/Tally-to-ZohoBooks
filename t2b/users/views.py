@@ -22,6 +22,10 @@ from django.shortcuts import render
 #         )
 #     return Response({"message": f"{len(ledgers)} ledgers synced successfully."})
 
+from rest_framework.authtoken.views import ObtainAuthToken
+from rest_framework.authtoken.models import Token
+from rest_framework.response import Response
+from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
@@ -177,47 +181,69 @@ def send_to_zoho(ledger_data, access_token):
         return False
 
 
-# Endpoint for syncing ledger data to Zoho Books (Optional)
-@api_view(['POST'])
-@permission_classes([IsAuthenticated])
-def sync_to_zoho(request):
-    """
-    Syncs the ledgers from the Django database to Zoho Books.
-    """
-    # Fetch all ledgers associated with the authenticated user
-    ledgers = Ledger.objects.filter(user=request.user)
-
-    # Assuming the Zoho Books API access token is stored in the environment
-    zoho_access_token = 'YOUR_ZOHO_OAUTH_ACCESS_TOKEN'  # Replace with dynamic token management
-
-    success_count = 0
-    failed_count = 0
-
-    # Iterate over each ledger and push it to Zoho Books
-    for ledger in ledgers:
-        ledger_data = {
-            "name": ledger.name,
-            "parent": ledger.parent,
-            "phone": ledger.phone
-        }
-
-        # Send to Zoho
-        if send_to_zoho(ledger_data, zoho_access_token):
-            success_count += 1
-        else:
-            failed_count += 1
-
-    # Return a summary response
-    return Response({
-        "message": f"Successfully synced {success_count} ledgers to Zoho Books. Failed to sync {failed_count} ledgers."
-    }, status=status.HTTP_200_OK)
-
-
-
-from rest_framework.authtoken.views import ObtainAuthToken
-from rest_framework.authtoken.models import Token
+from django.utils.timezone import now, timedelta
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
-from rest_framework import status
+from .models import ZohoBooksCredential
+import requests
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def connect_zoho_books(request):
+    """
+    Save Zoho Books credentials, refresh access token and validate connection.
+    """
+    user = request.user
+    data = request.data
+
+    required_fields = ["client_id", "client_secret", "refresh_token", "organization_id"]
+    if not all(field in data for field in required_fields):
+        return Response({"error": "Missing one or more required fields."}, status=400)
+
+    # Attempt to get a new access token
+    token_url = "https://accounts.zoho.com/oauth/v2/token"
+    params = {
+        "refresh_token": data["refresh_token"],
+        "client_id": data["client_id"],
+        "client_secret": data["client_secret"],
+        "grant_type": "refresh_token"
+    }
+
+    token_response = requests.post(token_url, params=params)
+    if token_response.status_code != 200:
+        return Response({"error": "Failed to connect to Zoho.", "details": token_response.json()}, status=400)
+
+    token_data = token_response.json()
+    access_token = token_data["access_token"]
+    expires_in = int(token_data.get("expires_in", 3600))
+
+    # Save or update credentials
+    ZohoBooksCredential.objects.update_or_create(
+        user=user,
+        defaults={
+            "client_id": data["client_id"],
+            "client_secret": data["client_secret"],
+            "refresh_token": data["refresh_token"],
+            "access_token": access_token,
+            "token_expires_at": now() + timedelta(seconds=expires_in),
+            "organization_id": data["organization_id"]
+        }
+    )
+
+    # Optional: Validate connection by calling a basic Zoho Books API
+    headers = {
+        "Authorization": f"Zoho-oauthtoken {access_token}"
+    }
+    test_url = f"https://books.zoho.com/api/v3/organizations?organization_id={data['organization_id']}"
+    test_response = requests.get(test_url, headers=headers)
+
+    if test_response.status_code == 200:
+        return Response({"message": "Connected to Zoho Books successfully."})
+    else:
+        return Response({"error": "Failed to verify Zoho Books connection.", "details": test_response.json()}, status=400)
+
+
 
 class CustomAuthToken(ObtainAuthToken):
     def post(self, request, *args, **kwargs):
@@ -239,3 +265,98 @@ class CustomAuthToken(ObtainAuthToken):
 # pip install pycopg2
 # pip install psycopg2-binary
 # pip install whitenoise
+
+from .utils import get_valid_zoho_access_token
+
+
+def push_customers_to_zoho(user):
+    from .models import Ledger
+    access_token, org_id = get_valid_zoho_access_token(user)
+
+    ledgers = Ledger.objects.filter(user=user)
+    url = f"https://books.zoho.com/api/v3/customers?organization_id={org_id}"
+    headers = {
+        "Authorization": f"Zoho-oauthtoken {access_token}"
+    }
+
+    for ledger in ledgers:
+        data = {
+            "contact_name": ledger.name,
+            "company_name": ledger.name,
+            "email": ledger.email,
+            "billing_address": {
+                "address": ledger.address or "",
+                "zip": ledger.pincode or "",
+                "state": ledger.state_name or "",
+                "country": ledger.country_name or ""
+            },
+            "contact_persons": [
+                {
+                    "first_name": ledger.name,
+                    "email": ledger.email,
+                    "phone": ledger.ledger_mobile or "",
+                }
+            ]
+        }
+
+        r = requests.post(url, headers=headers, json=data)
+        print(f"[Customer] {ledger.name} → {r.status_code}", r.json())
+
+def push_vendors_to_zoho(user):
+    from .models import Vendor
+    access_token, org_id = get_valid_zoho_access_token(user)
+
+    vendors = Vendor.objects.filter(user=user)
+    url = f"https://books.zoho.com/api/v3/vendors?organization_id={org_id}"
+    headers = {
+        "Authorization": f"Zoho-oauthtoken {access_token}"
+    }
+
+    for vendor in vendors:
+        data = {
+            "vendor_name": vendor.name,
+            "email": vendor.email,
+            "billing_address": {
+                "address": vendor.address or "",
+                "zip": vendor.pincode or "",
+                "state": vendor.state_name or "",
+                "country": vendor.country_name or ""
+            },
+            "phone": vendor.ledger_mobile or ""
+        }
+
+        r = requests.post(url, headers=headers, json=data)
+        print(f"[Vendor] {vendor.name} → {r.status_code}", r.json())
+
+def push_accounts_to_zoho(user):
+    from .models import Account
+    access_token, org_id = get_valid_zoho_access_token(user)
+
+    accounts = Account.objects.all()
+    url = f"https://books.zoho.com/api/v3/chartofaccounts?organization_id={org_id}"
+    headers = {
+        "Authorization": f"Zoho-oauthtoken {access_token}"
+    }
+
+    for account in accounts:
+        data = {
+            "account_name": account.account_name,
+            "account_type": account.account_type,
+            "account_code": account.account_code
+        }
+
+        r = requests.post(url, headers=headers, json=data)
+        print(f"[Account] {account.account_name} → {r.status_code}", r.json())
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def push_all_to_zoho(request):
+    user = request.user
+    try:
+        push_customers_to_zoho(user)
+        push_vendors_to_zoho(user)
+        push_accounts_to_zoho(user)
+        return Response({"message": "Data pushed to Zoho Books successfully."})
+    except Exception as e:
+        return Response({"error": str(e)}, status=500)
+

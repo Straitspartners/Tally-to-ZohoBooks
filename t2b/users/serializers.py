@@ -45,3 +45,10 @@ class AccountSerializer(serializers.ModelSerializer):
     class Meta:
         model = Account
         fields = ['account_name', 'account_code', 'account_type']
+
+class ZohoBooksCredentialSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ZohoBooksCredential
+        fields = [
+            "client_id", "client_secret", "refresh_token", "organization_id"
+        ]

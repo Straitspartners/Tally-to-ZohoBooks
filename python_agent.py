@@ -128,6 +128,68 @@ TALLY_REQUEST_XML_VENDORS = """
 </ENVELOPE>
 """
 
+TALLY_REQUEST_XML_COA = """
+<ENVELOPE>
+  <HEADER>
+    <VERSION>1</VERSION>
+    <TALLYREQUEST>Export</TALLYREQUEST>
+    <TYPE>Collection</TYPE>
+    <ID>All Ledgers</ID>
+  </HEADER>
+  <BODY>
+    <DESC>
+      <STATICVARIABLES>
+        <SVEXPORTFORMAT>$$SysName:XML</SVEXPORTFORMAT>
+      </STATICVARIABLES>
+      <TDL>
+        <TDLMESSAGE>
+          <COLLECTION NAME="All Ledgers" ISMODIFY="No">
+            <TYPE>Ledger</TYPE>
+            <FETCH>NAME, PARENT</FETCH>
+          </COLLECTION>
+        </TDLMESSAGE>
+      </TDL>
+    </DESC>
+  </BODY>
+</ENVELOPE>
+"""
+
+TALLY_TO_ZOHO_ACCOUNT_TYPE = {
+    "Bank Accounts": "Bank",
+    "Bank OCC A/c": "Bank",
+    "Bank OD A/c": "Loan",
+    "Branch / Divisions": "Other Current Asset",
+    "Capital Account": "Equity",
+    "Cash-in-Hand": "Cash and Cash Equivalents",
+    "Current Assets": "Other Current Asset",
+    "Current Liabilities": "Current Liability",
+    "Deposits (Asset)": "Deposits",
+    "Direct Expenses": "Cost of Goods Sold (COGS)",
+    "Direct Incomes": "Revenue",
+    "Duties & Taxes": "Tax Payable",
+    "Expenses (Direct)": "Cost of Goods Sold (COGS)",
+    "Expenses (Indirect)": "Other Expense",
+    "Fixed Assets": "Fixed Asset",
+    "Income (Direct)": "Revenue",
+    "Income (Indirect)": "Other Income",
+    "Indirect Expenses": "Other Expense",
+    "Indirect Incomes": "Other Income",
+    "Investments": "Investments",
+    "Loans & Advances (Asset)": "Other Current Asset",
+    "Loans (Liability)": "Loan",
+    "Misc. Expenses (ASSET)": "Prepaid Expense",
+    "Provisions": "Other Current Liability",
+    "Purchase Accounts": "Cost of Goods Sold",
+    "Reserves & Surplus": "Equity",
+    "Retained Earnings": "Retained Earnings",
+    "Sales Accounts": "Revenue",
+    "Secured Loans": "Loan",
+    "Stock-in-Hand": "Inventory Asset",
+    "Sundry Creditors": "Accounts Payable",
+    "Sundry Debtors": "Accounts Receivable",
+    "Suspense A/c": "Suspense Account",
+    "Unsecured Loans": "Loan",
+}
 
 # ---------------- XML PARSER ----------------
 
@@ -265,6 +327,29 @@ def parse_ledgers(xml_data, ledger_type="customer"):
             file.write(xml_data)
         raise Exception("Failed to parse Tally XML response.")
 
+def parse_coa_ledgers(xml_data):
+    accounts = []
+    try:
+        xml_data = clean_xml(xml_data)
+        print(xml_data)
+        root = ET.fromstring(xml_data)
+
+        for ledger in root.findall(".//LEDGER"):
+            name = ledger.findtext(".//NAME", default="Unknown")
+            parent = ledger.findtext("PARENT", default="Unknown")
+            account_type = TALLY_TO_ZOHO_ACCOUNT_TYPE.get(parent, "Other Expense")
+
+            accounts.append({
+                "account_name": name,
+                "account_code": name,  # assuming Tally name is code for now
+                "account_type": account_type,
+            })
+
+        return accounts
+
+    except ET.ParseError as e:
+        logging.error(f"XML Parse Error (COA): {e}")
+        raise Exception("Failed to parse COA XML from Tally.")
 
 # ---------------- TALLY SYNC ----------------
 
@@ -305,6 +390,14 @@ def send_vendors_to_django(vendors):
         logging.error(f"Error sending vendors to Django: {e}")
         raise Exception("Failed to send vendors data to server.")
 
+def send_coa_to_django(accounts):
+    try:
+        headers = {"Authorization": f"Token {AUTH_TOKEN}"}
+        response = requests.post("http://127.0.0.1:8000/api/users/accounts/", json={"accounts": accounts}, headers=headers)
+        response.raise_for_status()
+    except requests.exceptions.RequestException as e:
+        logging.error(f"Error sending COA to Django: {e}")
+        raise Exception("Failed to send COA data to server.")
 
 # ---------------- GUI LOGIC ----------------
 
@@ -341,6 +434,10 @@ def sync_data():
         xml_vendors = get_tally_data(TALLY_REQUEST_XML_VENDORS)
         vendors = parse_ledgers(xml_vendors, ledger_type="vendor")
 
+        # Chart of Accounts
+        xml_coa = get_tally_data(TALLY_REQUEST_XML_COA)
+        accounts = parse_coa_ledgers(xml_coa)
+
         if not customers and not vendors:
             messagebox.showwarning("No Data", "No customers or vendors found in Tally.")
             status_label.config(text="No ledgers found.", fg="orange")
@@ -350,6 +447,8 @@ def sync_data():
             send_customers_to_django(customers)
         if vendors:
             send_vendors_to_django(vendors)
+        if accounts:
+            send_coa_to_django(accounts)
 
         messagebox.showinfo("Success", "Customers and Vendors synced successfully!")
         status_label.config(text="✅ Sync complete!", fg="green")
