@@ -149,6 +149,43 @@ class AccountSyncView(APIView):
             "created": created,
             "errors": errors
         }, status=status.HTTP_201_CREATED if not errors else status.HTTP_207_MULTI_STATUS)
+    
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def sync_items(request):
+    items_data = request.data.get("items", [])
+    if not items_data:
+        return Response({"error": "No items provided."}, status=status.HTTP_400_BAD_REQUEST)
+
+    created = []
+    errors = []
+
+    for item in items_data:
+        # Optional: resolve account by account_code if provided
+        account_obj = None
+        account_code = item.get("account_code")
+        if account_code:
+            account_obj = Account.objects.filter(account_code=account_code).first()
+
+        item_obj, created_flag = Item.objects.update_or_create(
+            user=request.user,
+            name=item.get("name"),
+            defaults={
+                "rate": item.get("rate", 0.0),
+                "description": item.get("description", ""),
+                "sku": item.get("sku", ""),
+                "product_type": item.get("product_type", ""),
+                "account": account_obj
+            }
+        )
+        created.append(item_obj.name)
+
+    return Response({
+        "message": f"{len(created)} items synced successfully.",
+        "items": created
+    }, status=status.HTTP_200_OK)
+
 
 # Send the data to Zoho Books (Optional: Example function)
 def send_to_zoho(ledger_data, access_token):
@@ -269,21 +306,84 @@ class CustomAuthToken(ObtainAuthToken):
 from .utils import get_valid_zoho_access_token
 
 
+# def push_customers_to_zoho(user):
+#     from .models import Ledger
+#     access_token, org_id = get_valid_zoho_access_token(user)
+
+#     # Debug print
+#     print("Access Token:", access_token)
+#     print("Org ID:", org_id)
+
+
+#     ledgers = Ledger.objects.filter(user=user)
+#     url = f"https://www.zohoapis.com/books/v3/contacts?organization_id={org_id}"
+#     headers = {
+#         "Authorization": f"Zoho-oauthtoken {access_token}",
+#         "Content-Type": "application/json"
+#     }
+
+#     for ledger in ledgers:
+#         data = {
+#             "contact_name": ledger.name,
+#             "company_name": ledger.name,
+#             "email": ledger.email or f"{ledger.name.replace(' ', '').lower()}@exasdmple.com",
+#             "billing_address": {
+#                 "address": ledger.address or "",
+#                 "zip": ledger.pincode or "",
+#                 "state": ledger.state_name or "",
+#                 "country": ledger.country_name or ""
+#             },
+#             "contact_persons": [
+#                 {
+#                     "first_name": ledger.name,
+#                     "email": ledger.email or f"{ledger.name.replace(' ', '').lower()}@exdsample.com",
+#                     # "email": ledger.email,
+#                     "phone": ledger.ledger_mobile or "",
+#                 }
+#             ]
+#         }
+
+#         r = requests.post(url, headers=headers, json=data)
+#         print(f"[Customer] {ledger.name} → {r.status_code}", r.json())
+
+import requests
+from .models import Ledger
+
 def push_customers_to_zoho(user):
-    from .models import Ledger
     access_token, org_id = get_valid_zoho_access_token(user)
 
+    print("Access Token:", access_token)
+    print("Org ID:", org_id)
+
     ledgers = Ledger.objects.filter(user=user)
-    url = f"https://books.zoho.com/api/v3/customers?organization_id={org_id}"
+    base_url = "https://www.zohoapis.com/books/v3"
     headers = {
-        "Authorization": f"Zoho-oauthtoken {access_token}"
+        "Authorization": f"Zoho-oauthtoken {access_token}",
+        "Content-Type": "application/json"
     }
 
     for ledger in ledgers:
+        email = ledger.email or f"{ledger.name.replace(' ', '').lower()}@example.com"
+        contact_name = ledger.name
+
+        # Check if contact already exists
+        search_url = f"{base_url}/contacts?organization_id={org_id}&email={email}"
+        search_response = requests.get(search_url, headers=headers)
+        try:
+            search_data = search_response.json()
+        except ValueError:
+            print(f"[Search Failed] Invalid JSON while searching {contact_name}")
+            continue
+
+        if search_response.status_code == 200 and search_data.get("contacts"):
+            print(f"[Skipped] {contact_name} already exists in Zoho Books.")
+            continue
+
         data = {
-            "contact_name": ledger.name,
-            "company_name": ledger.name,
-            "email": ledger.email,
+            "contact_name": contact_name,
+            "company_name": contact_name,
+            "email": email,
+            "phone": ledger.ledger_mobile or "",
             "billing_address": {
                 "address": ledger.address or "",
                 "zip": ledger.pincode or "",
@@ -292,48 +392,46 @@ def push_customers_to_zoho(user):
             },
             "contact_persons": [
                 {
-                    "first_name": ledger.name,
-                    "email": ledger.email,
-                    "phone": ledger.ledger_mobile or "",
+                    "first_name": contact_name,
+                    "email": email,
+                    "phone": ledger.ledger_mobile or ""
                 }
-            ]
+            ],
+            # Optional fields you can add if available:
+            # "website": ledger.website or "",
+            # "gst_treatment": "business_gst" or "consumer",  # depends on country
+            # "place_of_contact": ledger.state_name or ""
         }
 
-        r = requests.post(url, headers=headers, json=data)
-        print(f"[Customer] {ledger.name} → {r.status_code}", r.json())
+        try:
+            response = requests.post(
+                f"{base_url}/contacts?organization_id={org_id}",
+                headers=headers,
+                json=data
+            )
+            response_data = response.json()
+        except ValueError:
+            print(f"[Error] Invalid response for {contact_name}")
+            continue
 
-def push_vendors_to_zoho(user):
-    from .models import Vendor
-    access_token, org_id = get_valid_zoho_access_token(user)
+        if response.status_code == 201:
+            print(f"[Success] {contact_name} pushed successfully.")
+        else:
+            print(f"[Failed] {contact_name} → Status: {response.status_code} | Response: {response_data}")
 
-    vendors = Vendor.objects.filter(user=user)
-    url = f"https://books.zoho.com/api/v3/vendors?organization_id={org_id}"
-    headers = {
-        "Authorization": f"Zoho-oauthtoken {access_token}"
-    }
 
-    for vendor in vendors:
-        data = {
-            "vendor_name": vendor.name,
-            "email": vendor.email,
-            "billing_address": {
-                "address": vendor.address or "",
-                "zip": vendor.pincode or "",
-                "state": vendor.state_name or "",
-                "country": vendor.country_name or ""
-            },
-            "phone": vendor.ledger_mobile or ""
-        }
 
-        r = requests.post(url, headers=headers, json=data)
-        print(f"[Vendor] {vendor.name} → {r.status_code}", r.json())
 
 def push_accounts_to_zoho(user):
     from .models import Account
     access_token, org_id = get_valid_zoho_access_token(user)
 
+    # Debug print
+    print("Access Token:", access_token)
+    print("Org ID:", org_id)
+
     accounts = Account.objects.all()
-    url = f"https://books.zoho.com/api/v3/chartofaccounts?organization_id={org_id}"
+    url = f"https://www.zohoapis.com/books/v3/chartofaccounts?organization_id={org_id}"
     headers = {
         "Authorization": f"Zoho-oauthtoken {access_token}"
     }
@@ -348,6 +446,154 @@ def push_accounts_to_zoho(user):
         r = requests.post(url, headers=headers, json=data)
         print(f"[Account] {account.account_name} → {r.status_code}", r.json())
 
+# def push_vendors_to_zoho(user):
+#     from .models import Vendor
+#     import requests
+
+#     access_token, org_id = get_valid_zoho_access_token(user)
+#     print("Access Token:", access_token)
+#     print("Org ID:", org_id)
+
+#     vendors = Vendor.objects.filter(user=user)
+#     url = "https://www.zohoapis.com/books/v3/contacts"
+#     headers = {
+#         "Authorization": f"Zoho-oauthtoken {access_token}",
+#         "Content-Type": "application/json"
+#     }
+#     params = {
+#         "organization_id": org_id
+#     }
+
+#     for vendor in vendors:
+#         data = {
+#             "contact_type": "vendor",  # Specify contact type as vendor
+#             "contact_name": vendor.name,
+#             "vendor_name": vendor.name,
+#             "email": vendor.email or f"{vendor.name.replace(' ', '').lower()}@example.com",
+#             "billing_address": {
+#                 "address": vendor.address or "",
+#                 "zip": vendor.pincode or "",
+#                 "state": vendor.state_name or "",
+#                 "country": vendor.country_name or ""
+#             },
+#             "phone": vendor.ledger_mobile or ""
+#         }
+
+#         r = requests.post(url, headers=headers, params=params, json=data)
+#         print(f"[Vendor] {vendor.name} → {r.status_code}", r.json())
+
+def push_vendors_to_zoho(user):
+    from .models import Vendor
+    import requests
+
+    access_token, org_id = get_valid_zoho_access_token(user)
+    print("Access Token:", access_token)
+    print("Org ID:", org_id)
+
+    vendors = Vendor.objects.filter(user=user)
+    base_url = "https://www.zohoapis.com/books/v3"
+    headers = {
+        "Authorization": f"Zoho-oauthtoken {access_token}",
+        "Content-Type": "application/json"
+    }
+
+    for vendor in vendors:
+        email = vendor.email.strip() if vendor.email and vendor.email.strip() else f"{vendor.name.replace(' ', '').lower()}@example.com"
+        print(f"Resolved Email for {vendor.name}: {email}")
+        contact_name = vendor.name
+
+        # Check if the vendor already exists in Zoho Books
+        search_url = f"{base_url}/contacts"
+        search_params = {
+            "organization_id": org_id,
+            "email": email
+        }
+
+        try:
+            search_response = requests.get(search_url, headers=headers, params=search_params)
+            search_data = search_response.json()
+        except ValueError:
+            print(f"[Search Failed] Invalid JSON while searching vendor {contact_name}")
+            continue
+
+        if search_response.status_code == 200 and search_data.get("contacts"):
+            print(f"[Skipped] Vendor {contact_name} already exists in Zoho Books.")
+            continue
+
+        # Prepare vendor data
+        data = {
+            "contact_type": "vendor",
+            "contact_name": contact_name,
+            "vendor_name": contact_name,
+            "email": email,
+            "phone": vendor.ledger_mobile or "",
+            "billing_address": {
+                "address": vendor.address or "",
+                "zip": vendor.pincode or "",
+                "state": vendor.state_name or "",
+                "country": vendor.country_name or ""
+            }
+        }
+
+        # Push to Zoho Books
+        try:
+            response = requests.post(
+                f"{base_url}/contacts",
+                headers=headers,
+                params={"organization_id": org_id},
+                json=data
+            )
+            response_data = response.json()
+        except ValueError:
+            print(f"[Error] Invalid response while pushing vendor {contact_name}")
+            continue
+
+        if response.status_code == 201:
+            print(f"[Success] Vendor {contact_name} pushed successfully.")
+        else:
+            print(f"[Failed] Vendor {contact_name} → Status: {response.status_code} | Response: {response_data}")
+
+def push_items_to_zoho(user):
+    from .models import Item
+    access_token, org_id = get_valid_zoho_access_token(user)
+
+    print("Access Token:", access_token)
+    print("Org ID:", org_id)
+
+    items = Item.objects.filter(user=user)
+    url = f"https://www.zohoapis.com/books/v3/items?organization_id={org_id}"
+    headers = {
+        "Authorization": f"Zoho-oauthtoken {access_token}",
+        "Content-Type": "application/json"
+    }
+
+    for item in items:
+        data = {
+            "name": item.name,
+            "rate": float(item.rate),
+            "description": item.description or "",
+            "sku": item.sku or "",
+            # "product_type": item.product_type or "goods",  # Must be 'goods' or 'service'
+        }
+
+        # Optionally map account to Zoho "account_id"
+        if item.account:
+            # Here you can extend logic to fetch and map Zoho account_id if needed
+            data["account_id"] = None  # Optional field if you sync Zoho account IDs
+
+        response = requests.post(url, headers=headers, json=data)
+        try:
+            response_data = response.json()
+        except Exception as e:
+            print(f"[Item Push Error] Invalid response for {item.name}: {e}")
+            continue
+
+        if response.status_code == 201:
+            print(f"[Success] {item.name} pushed successfully.")
+        else:
+            print(f"[Failed] {item.name} → Status: {response.status_code} | Response: {response_data}")
+
+
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def push_all_to_zoho(request):
@@ -356,6 +602,7 @@ def push_all_to_zoho(request):
         push_customers_to_zoho(user)
         push_vendors_to_zoho(user)
         push_accounts_to_zoho(user)
+        push_items_to_zoho(user)
         return Response({"message": "Data pushed to Zoho Books successfully."})
     except Exception as e:
         return Response({"error": str(e)}, status=500)

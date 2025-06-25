@@ -75,6 +75,19 @@ class Account(models.Model):
     def __str__(self):
         return self.account_name
     
+class Item(models.Model):
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, null=True)
+    name = models.CharField(max_length=255)
+    rate = models.DecimalField(max_digits=10, decimal_places=2, default=0.0)
+    description = models.TextField(blank=True, null=True)
+    sku = models.CharField(max_length=100, blank=True, null=True)
+    product_type = models.CharField(max_length=100, blank=True, null=True)
+    account = models.ForeignKey(Account, on_delete=models.SET_NULL, null=True, blank=True)
+
+    def __str__(self):
+        return self.name
+
+    
 
 class ZohoBooksCredential(models.Model):
     user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)

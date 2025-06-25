@@ -52,3 +52,8 @@ class ZohoBooksCredentialSerializer(serializers.ModelSerializer):
         fields = [
             "client_id", "client_secret", "refresh_token", "organization_id"
         ]
+
+class ItemSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Item
+        fields = ['id', 'user', 'name', 'rate', 'description', 'sku', 'product_type', 'account']
