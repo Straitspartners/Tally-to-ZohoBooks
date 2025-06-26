@@ -26,6 +26,9 @@ SECRET_KEY = "django-insecure-@+%)6dsarz_7&*i^z9nq&*5-kph50gye01z+_i(w8(z%9@$*iu
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
+EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'
+
+
 ALLOWED_HOSTS = []
 
 CORS_ALLOWED_ORIGINS = [
@@ -39,7 +42,16 @@ CORS_ALLOW_ALL_ORIGINS = True
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': [
         'rest_framework.authentication.TokenAuthentication',
+        'rest_framework_simplejwt.authentication.JWTAuthentication',
     ],
+}
+
+# JWT settings
+
+from datetime import timedelta
+SIMPLE_JWT = {
+    'ACCESS_TOKEN_LIFETIME': timedelta(minutes=15),
+    'REFRESH_TOKEN_LIFETIME': timedelta(days=1),
 }
 
 
@@ -70,6 +82,8 @@ MIDDLEWARE = [
 ]
 
 # AUTH_USER_MODEL = 'users.CustomUser'
+
+
 
 ROOT_URLCONF = "t2b.urls"
 

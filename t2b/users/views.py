@@ -444,7 +444,16 @@ def push_accounts_to_zoho(user):
         }
 
         r = requests.post(url, headers=headers, json=data)
-        print(f"[Account] {account.account_name} → {r.status_code}", r.json())
+        response_data = r.json()
+        print(f"[Zoho Response] {response_data}")
+
+        if r.status_code == 201:  # Successfully created
+            zoho_account_id = response_data['chart_of_account']['account_id']
+            account.zoho_account_id = zoho_account_id  # assumes your model has this field
+            account.save()
+            print(f"[Account] {account.account_name} → Created in Zoho with ID {zoho_account_id}")
+        else:
+            print(f"[Error] Failed to create {account.account_name} →", response_data)
 
 # def push_vendors_to_zoho(user):
 #     from .models import Vendor
@@ -607,3 +616,92 @@ def push_all_to_zoho(request):
     except Exception as e:
         return Response({"error": str(e)}, status=500)
 
+
+## Signup,Sigin,Forgot Password
+
+from django.contrib.auth.models import User
+from django.contrib.auth import authenticate
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from rest_framework import status
+from rest_framework.permissions import AllowAny
+from rest_framework_simplejwt.tokens import RefreshToken
+from django.utils.encoding import smart_bytes, smart_str, DjangoUnicodeDecodeError
+from django.utils.http import urlsafe_base64_encode, urlsafe_base64_decode
+from django.core.mail import send_mail
+from .tokens import account_activation_token
+from .serializers import *
+
+class RegisterView(APIView):
+    permission_classes = [AllowAny]
+    def post(self, request):
+        serializer = RegisterSerializer(data=request.data)
+        if serializer.is_valid():
+            serializer.save()
+            return Response({"msg": "User created"}, status=201)
+        return Response(serializer.errors, status=400)
+
+class LoginView(APIView):
+    permission_classes = [AllowAny]
+    def post(self, request):
+        serializer = LoginSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        identifier = serializer.validated_data['identifier']
+        password = serializer.validated_data['password']
+        user = User.objects.filter(email=identifier).first() or User.objects.filter(username=identifier).first()
+        if user is None or not user.check_password(password):
+            return Response({"error": "Invalid credentials"}, status=400)
+        token = RefreshToken.for_user(user)
+        return Response({
+            'refresh': str(token),
+            'access': str(token.access_token),
+        })
+
+class RequestPasswordResetEmail(APIView):
+    permission_classes = [AllowAny]
+    def post(self, request):
+        serializer = ResetPasswordEmailRequestSerializer(data=request.data)
+        if serializer.is_valid():
+            email = serializer.validated_data['email']
+            user = User.objects.filter(email=email).first()
+            if user:
+                uidb64 = urlsafe_base64_encode(smart_bytes(user.id))
+                token = account_activation_token.make_token(user)
+                reset_link = f"http://localhost:3000/password-reset/{uidb64}/{token}"
+                send_mail(
+                    "Password Reset",
+                    f"Click link to reset password: {reset_link}",
+                    "noreply@example.com",
+                    [email],
+                )
+            return Response({"msg": "Check your email if account exists."})
+        return Response(serializer.errors, status=400)
+
+class PasswordTokenCheckAPI(APIView):
+    permission_classes = [AllowAny]
+    def get(self, request, uidb64, token):
+        try:
+            user_id = smart_str(urlsafe_base64_decode(uidb64))
+            user = User.objects.get(id=user_id)
+            if not account_activation_token.check_token(user, token):
+                return Response({"error": "Invalid token"}, status=401)
+            return Response({"success": True, "uidb64": uidb64, "token": token})
+        except Exception:
+            return Response({"error": "Token check failed"}, status=400)
+
+class SetNewPasswordAPIView(APIView):
+    permission_classes = [AllowAny]
+    def post(self, request):
+        serializer = SetNewPasswordSerializer(data=request.data)
+        if serializer.is_valid():
+            try:
+                user_id = smart_str(urlsafe_base64_decode(serializer.validated_data['uidb64']))
+                user = User.objects.get(id=user_id)
+                if not account_activation_token.check_token(user, serializer.validated_data['token']):
+                    return Response({"error": "Invalid token"}, status=401)
+                user.set_password(serializer.validated_data['password'])
+                user.save()
+                return Response({"msg": "Password reset successful"})
+            except DjangoUnicodeDecodeError:
+                return Response({"error": "Invalid decode"}, status=400)
+        return Response(serializer.errors, status=400)

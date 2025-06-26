@@ -217,18 +217,18 @@ TALLY_REQUEST_XML_ITEMS = """
 #     "Unsecured Loans": "Loan",
 # }
 TALLY_TO_ZOHO_ACCOUNT_TYPE = {
-    "Bank Accounts": "bank",
-    "Bank OCC A/c": "bank",
-    "Bank OD A/c": "loans_and_borrowing",
-    "Branch / Divisions": "other_liability",
+    "Bank Accounts": "bank", ##Bank
+    "Bank OCC A/c": "bank",  ##Bank
+    "Bank OD A/c": "bank",   ##N
+    "Branch / Divisions": "other_liability",  
     "Capital Account": "equity",
     "Cash-in-Hand": "cash",
-    "Current Assets": "other_current_asset",
+    "Current Assets": "other_current_asset", 
     "Current Liabilities": "other_current_liability",
     "Deposits (Asset)": "other_current_asset",
     "Direct Expenses": "expense",
     "Direct Incomes": "income",
-    "Duties & Taxes": "tax_expense",
+    "Duties & Taxes": "other_current_asset",  #other current asset
     "Expenses (Direct)": "expense",
     "Expenses (Indirect)": "other_expense",
     "Fixed Assets": "fixed_asset",
@@ -236,21 +236,21 @@ TALLY_TO_ZOHO_ACCOUNT_TYPE = {
     "Income (Indirect)": "other_income",
     "Indirect Expenses": "other_expense",
     "Indirect Incomes": "other_income",
-    "Investments": "financial_asset",
-    "Loans & Advances (Asset)": "other_current_asset",
-    "Loans (Liability)": "long_term_liability",
+    "Investments": "other_current_asset",  #other_current_asset
+    "Loans & Advances (Asset)": "other_current_asset", ##Doubt
+    "Loans (Liability)": "long_term_liability", ##doubt me
     "Misc. Expenses (ASSET)": "other_asset",
     "Provisions": "other_current_liability",
     "Purchase Accounts": "cost_of_goods_sold",
     "Reserves & Surplus": "equity",
     "Retained Earnings": "income", 
     "Sales Accounts": "income",
-    "Secured Loans": "loans_and_borrowing", 
-    "Stock-in-Hand": "cost_of_goods_sold", 
+    "Secured Loans": "other_liability", 
+    "Stock-in-Hand": "cost_of_goods_sold", # --
     "Sundry Creditors": "accounts_payable",
     "Sundry Debtors": "accounts_receivable",
     "Suspense A/c": "other_liability",
-    "Unsecured Loans": "loans_and_borrowing",
+    "Unsecured Loans": "loans_and_borrowing", #--
 }
 # ---------------- XML PARSER ----------------
 
@@ -323,7 +323,7 @@ def parse_coa_ledgers(xml_data):
         for ledger in root.findall(".//LEDGER"):
             name = ledger.findtext(".//NAME", default="Unknown")
             parent = ledger.findtext("PARENT", default="Unknown")
-            account_type = TALLY_TO_ZOHO_ACCOUNT_TYPE.get(parent, "Other Expense")
+            account_type = TALLY_TO_ZOHO_ACCOUNT_TYPE.get(parent)
 
             accounts.append({
                 "account_name": name,

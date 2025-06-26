@@ -68,6 +68,7 @@ class Account(models.Model):
     account_name = models.CharField(max_length=255)
     account_code = models.CharField(max_length=255, unique=True)
     account_type = models.CharField(max_length=255)
+    zoho_account_id = models.CharField(max_length=255, blank=True, null=True)
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

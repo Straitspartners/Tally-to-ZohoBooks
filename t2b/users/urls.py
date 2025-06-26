@@ -12,6 +12,12 @@ urlpatterns = [
     path('users/accounts/', AccountSyncView.as_view(), name='account-sync'),
     path('users/connect-zoho/', views.connect_zoho_books, name='connect_zoho_books'),
     path('users/push-to-zoho/', views.push_all_to_zoho, name='push_all_to_zoho'),
+    path('register/', RegisterView.as_view()),
+    path('login/', LoginView.as_view()),
+    path('request-reset-email/', RequestPasswordResetEmail.as_view()),
+    path('password-reset/<uidb64>/<token>/', PasswordTokenCheckAPI.as_view()),
+    path('password-reset-complete/', SetNewPasswordAPIView.as_view()),
+
   
 
 ]
