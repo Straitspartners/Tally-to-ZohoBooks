@@ -29,7 +29,7 @@ DEBUG = True
 EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'
 
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = ['192.168.1.12', 'localhost', '127.0.0.1' ]
 
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:9000",  # If using Tally sync agent on another port
