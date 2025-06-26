@@ -2,7 +2,7 @@ import os
 from .settings import *
 from .settings import BASE_DIR
 
-ALLOWED_HOSTS = [os.environ['WEBSITE_HOSTNAME']]
+ALLOWED_HOSTS = [os.environ['WEBSITE_HOSTNAME'], 'localhost', '127.0.0.1' ,'192.168.1.12',]
 CSRF_TRUSTED_ORIGINS = ['https://'+os.environ['WEBSITE_HOSTNAME']]
 DEBUG = False
 SECRET_KEY = os.environ['MY_SECRET_KEY']
@@ -19,9 +19,11 @@ MIDDLEWARE = [
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]
 
-# CORS_ALLOWED_ORIGINS = [
-#     'https://victorious-river-09d149f03.4.azurestaticapps.net' 
-# ]
+CORS_ALLOWED_ORIGINS = [
+    # 'https://victorious-river-09d149f03.4.azurestaticapps.net' 
+    'http://localhost:3000',
+    "http://127.0.0.1:8000",
+]
 
 
 STORAGES = {
