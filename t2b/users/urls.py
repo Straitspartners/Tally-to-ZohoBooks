@@ -6,7 +6,7 @@ from .views import *
 # ]
 urlpatterns = [
     path('users/ledgers/', views.sync_ledgers, name='sync_ledgers'),  # Sync ledgers from Tally
-    path('generate_token/', CustomAuthToken.as_view(), name='generate_token'), 
+    path('generate_token/', EmailOrUsernameAuthToken.as_view(), name='generate_token'), 
     path('users/vendors/', views.sync_vendors, name='sync_vendors'),
     path('users/items/', views.sync_items, name='sync_items'),
     path('users/accounts/', AccountSyncView.as_view(), name='account-sync'),

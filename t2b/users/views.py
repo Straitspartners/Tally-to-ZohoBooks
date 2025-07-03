@@ -282,16 +282,39 @@ def connect_zoho_books(request):
 
 
 
-class CustomAuthToken(ObtainAuthToken):
-    def post(self, request, *args, **kwargs):
-        serializer = self.serializer_class(data=request.data,
-                                           context={'request': request})
-        if serializer.is_valid():
-            user = serializer.validated_data['user']
-            token, created = Token.objects.get_or_create(user=user)
-            return Response({'token': token.key})
-        return Response({'error': 'Invalid credentials'}, status=status.HTTP_400_BAD_REQUEST)
+# class CustomAuthToken(ObtainAuthToken):
+#     def post(self, request, *args, **kwargs):
+#         serializer = self.serializer_class(data=request.data,
+#                                            context={'request': request})
+#         if serializer.is_valid():
+#             user = serializer.validated_data['user']
+#             token, created = Token.objects.get_or_create(user=user)
+#             return Response({'token': token.key})
+#         return Response({'error': 'Invalid credentials'}, status=status.HTTP_400_BAD_REQUEST)
 
+from rest_framework.authtoken.views import ObtainAuthToken
+from rest_framework.response import Response
+from rest_framework.authtoken.models import Token
+from django.contrib.auth.models import User
+from django.contrib.auth import authenticate
+
+class EmailOrUsernameAuthToken(ObtainAuthToken):
+    def post(self, request, *args, **kwargs):
+        identifier = request.data.get('identifier')
+        password = request.data.get('password')
+
+        # Try email or username
+        try:
+            user_obj = User.objects.get(email=identifier)
+            username = user_obj.username
+        except User.DoesNotExist:
+            username = identifier
+
+        user = authenticate(username=username, password=password)
+        if user is not None:
+            token, created = Token.objects.get_or_create(user=user)
+            return Response({'token': token.key, 'user': {'username': user.username, 'email': user.email}})
+        return Response({'error': 'Invalid credentials'}, status=400)
 
 # Installers :
 
