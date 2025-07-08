@@ -16,14 +16,14 @@ AUTH_TOKEN = None
 #     "tally_url": "http://localhost:9000",
 #     "django_api_url": "https://tallytobooks-backend-bnezgff5eehsftfj.centralindia-01.azurewebsites.net/api/users/ledgers/",
 #     "django_url_vendors": "https://tallytobooks-backend-bnezgff5eehsftfj.centralindia-01.azurewebsites.net/api/users/vendors/",
-#     "auth_url": "https://tallytobooks-backend-bnezgff5eehsftfj.centralindia-01.azurewebsites.net/api/generate_token/"  # Django token endpoint
+#     "auth_url": "https://tallytobooks-backend-bnezgff5eehsftfj.centralindia-01.azurewebsites.net/api/generate_token_agent/"  # Django token endpoint
 # }
 
 DEFAULT_CONFIG = {
     "tally_url": "http://localhost:9000",
     "django_api_url": "http://127.0.0.1:8000/api/users/ledgers/",
     "django_url_vendors": "http://127.0.0.1:8000/api/users/vendors/",
-    "auth_url": "http://127.0.0.1:8000/api/generate_token/"  # Django token endpoint
+    "auth_url": "http://127.0.0.1:8000/api/generate_token_agent/"  # Django token endpoint
 }
 
 # ---------------- LOGGING ----------------
@@ -179,6 +179,38 @@ TALLY_REQUEST_XML_ITEMS = """
   </BODY>
 </ENVELOPE>
 """
+TALLY_REQUEST_XML_SALES_VOUCHERS = """
+<ENVELOPE>
+  <HEADER>
+    <VERSION>1</VERSION>
+    <TALLYREQUEST>Export</TALLYREQUEST>
+    <TYPE>Collection</TYPE>
+    <ID>Sales Vouchers</ID>
+  </HEADER>
+  <BODY>
+    <DESC>
+      <STATICVARIABLES>
+        <SVEXPORTFORMAT>$$SysName:XML</SVEXPORTFORMAT>
+        <EXPLODEFLAG>Yes</EXPLODEFLAG>
+        <SVFROMDATE>20240101</SVFROMDATE>
+        <SVTODATE>20251231</SVTODATE>
+      </STATICVARIABLES>
+      <TDL>
+        <TDLMESSAGE>
+          <COLLECTION NAME="Sales Vouchers" ISMODIFY="No">
+            <TYPE>Voucher</TYPE>
+            <FILTER>IsSales</FILTER>
+            <FETCH>DATE, VOUCHERNUMBER, LEDGERENTRIES.LIST, ALLINVENTORYENTRIES.LIST</FETCH>
+          </COLLECTION>
+          <SYSTEM TYPE="Formulae" NAME="IsSales">
+            $VoucherTypeName = "Sales"
+          </SYSTEM>
+        </TDLMESSAGE>
+      </TDL>
+    </DESC>
+  </BODY>
+</ENVELOPE>
+"""
 
 # TALLY_TO_ZOHO_ACCOUNT_TYPE = {
 #     "Bank Accounts": "Bank",
@@ -317,7 +349,7 @@ def parse_coa_ledgers(xml_data):
     accounts = []
     try:
         xml_data = clean_xml(xml_data)
-        print(xml_data)
+       
         root = ET.fromstring(xml_data)
 
         for ledger in root.findall(".//LEDGER"):
@@ -367,6 +399,109 @@ def parse_items(xml_data):
     except ET.ParseError as e:
         logging.error(f"XML Parse Error (Items): {e}")
         raise Exception("Failed to parse item XML from Tally.")
+    
+
+# def parse_sales_vouchers(xml_data):
+#     invoices = []
+#     try:
+#         xml_data = clean_xml(xml_data)
+#         print(xml_data)
+#         root = ET.fromstring(xml_data)
+
+#         for voucher in root.findall(".//VOUCHER"):
+#             invoice_number = voucher.findtext("VOUCHERNUMBER", default="Unknown")
+#             date = voucher.findtext("DATE", default="")
+#             formatted_date = f"{date[6:8]}-{date[4:6]}-{date[0:4]}" if len(date) == 8 else date
+
+#             # Get customer name from the first LedgerEntry
+#             ledger_entry = voucher.find(".//LEDGERENTRIES.LIST")
+#             customer_name = ledger_entry.findtext("LEDGERNAME", default="Unknown") if ledger_entry is not None else "Unknown"
+
+#             for inventory in voucher.findall(".//ALLINVENTORYENTRIES.LIST"):
+#                 item_name = inventory.findtext("STOCKITEMNAME", default="Unknown")
+#                 amount = inventory.findtext("AMOUNT", default="0")
+#                 quantity = inventory.findtext("ACTUALQTY", default="0")
+
+#                 invoices.append({
+#                     "customer_name": customer_name,
+#                     "invoice_number": invoice_number,
+#                     "invoice_date": formatted_date,
+#                     "item_name": item_name,
+#                     "quantity": quantity,
+#                     "amount": amount
+#                 })
+
+#         return invoices
+
+#     except ET.ParseError as e:
+#         logging.error(f"XML Parse Error (Sales Vouchers): {e}")
+#         raise Exception("Failed to parse Sales Voucher XML from Tally.")
+
+from collections import defaultdict
+
+def parse_sales_vouchers(xml_data):
+    invoices = defaultdict(lambda: {
+        "customer_name": "",
+        "invoice_number": "",
+        "invoice_date": "",
+        "items": [],
+        "cgst": 0.0,
+        "sgst": 0.0,
+        "total_amount": 0.0
+    })
+
+    xml_data = clean_xml(xml_data)
+    root = ET.fromstring(xml_data)
+
+    for voucher in root.findall(".//VOUCHER"):
+        inv_no = voucher.findtext("VOUCHERNUMBER", default="Unknown")
+        ledger_entry = voucher.find(".//LEDGERENTRIES.LIST")
+        customer = ledger_entry.findtext("LEDGERNAME", default="Unknown") if ledger_entry is not None else "Unknown"
+        date_raw = voucher.findtext("DATE", default="")
+        date = f"{date_raw[6:8]}-{date_raw[4:6]}-{date_raw[0:4]}" if len(date_raw) == 8 else date_raw
+
+        key = (inv_no, customer, date)
+
+        invoice = invoices[key]
+        invoice["customer_name"] = customer
+        invoice["invoice_number"] = inv_no
+        invoice["invoice_date"] = date
+
+        # Line items
+        for item in voucher.findall(".//ALLINVENTORYENTRIES.LIST"):
+            item_name = item.findtext("STOCKITEMNAME", default="")
+            qty = item.findtext("ACTUALQTY", default="")
+            amt = float(item.findtext("AMOUNT", default="0.0"))
+
+            invoice["items"].append({
+                "item_name": item_name,
+                "quantity": qty.strip(),
+                "amount": f"{amt:.2f}"
+            })
+            invoice["total_amount"] += amt
+
+        # Taxes (CGST, SGST)
+        for ledger in voucher.findall(".//LEDGERENTRIES.LIST"):
+            ledger_name = ledger.findtext("LEDGERNAME", "").lower()
+            amt = float(ledger.findtext("AMOUNT", default="0.0"))
+
+            if "cgst" in ledger_name:
+                invoice["cgst"] += abs(amt)
+            elif "sgst" in ledger_name:
+                invoice["sgst"] += abs(amt)
+
+    # Format totals as string with 2 decimals
+    return [
+        {
+            **inv,
+            "cgst": f"{inv['cgst']:.2f}",
+            "sgst": f"{inv['sgst']:.2f}",
+            "total_amount": f"{(inv['total_amount'] + inv['cgst'] + inv['sgst']):.2f}"
+        }
+        for inv in invoices.values()
+    ]
+
+
 
 
 # ---------------- TALLY SYNC ----------------
@@ -415,6 +550,61 @@ def send_items_to_django(items):
     except requests.exceptions.RequestException as e:
         logging.error(f"Error sending items to Django: {e}")
         raise Exception("Failed to send items to server.")
+    
+def send_invoices_to_django(invoices):
+    try:
+        # Strong filtering logic
+        valid_invoices = []
+        for inv in invoices:
+            if (
+                inv.get("customer_name") not in [None, "", "Unknown"]
+                and inv.get("invoice_number") not in [None, "", "Unknown"]
+                and inv.get("invoice_date")
+                and inv.get("items") and isinstance(inv.get("items"), list) and len(inv.get("items")) > 0
+            ):
+                valid_invoices.append(inv)
+            else:
+                print(f"⚠️ Skipping invalid invoice: {inv}")
+
+        if not valid_invoices:
+            raise Exception("No valid invoices to send.")
+
+        headers = {"Authorization": f"Token {AUTH_TOKEN}"}
+        response = requests.post(
+            "http://127.0.0.1:8000/api/users/invoices/",
+            json={"invoices": valid_invoices},
+            headers=headers
+        )
+        response.raise_for_status()
+    except requests.exceptions.RequestException as e:
+        logging.error(f"Error sending invoices to Django: {e}")
+        raise Exception("Failed to send invoices to server.")
+
+from datetime import datetime
+
+def format_invoice_data(invoices):
+    formatted = []
+    for inv in invoices:
+        try:
+            inv["cgst"] = float(inv.get("cgst", 0))
+            inv["sgst"] = float(inv.get("sgst", 0))
+            inv["total_amount"] = float(inv.get("total_amount", 0))
+            # inv["invoice_date"] = datetime.strptime(inv["invoice_date"], "%d-%m-%Y").strftime("%Y-%m-%d")
+            
+            # Fix items too
+            for item in inv.get("items", []):
+                item["amount"] = float(item.get("amount", 0))
+                item["quantity"] = item.get("quantity", "").strip()
+                item["item_name"] = item.get("item_name", "").strip()
+
+            formatted.append(inv)
+
+        except Exception as e:
+            print(f"Skipping invoice due to format error: {inv}, error: {e}")
+    
+    return formatted
+
+
 
 
 # ---------------- GUI LOGIC ----------------
@@ -440,9 +630,23 @@ def sync_data():
         xml_items = get_tally_data(TALLY_REQUEST_XML_ITEMS)
         items = parse_items(xml_items)
 
-        if items:
-            send_items_to_django(items)
+        # Invoices
+        xml_sales = get_tally_data(TALLY_REQUEST_XML_SALES_VOUCHERS)
+        invoices = parse_sales_vouchers(xml_sales)
+        from datetime import datetime
+        for invoice in invoices:
+          try:
+            if invoice.get("invoice_date"):
+              invoice["invoice_date"] = datetime.strptime(invoice["invoice_date"], "%d-%m-%Y").strftime("%Y-%m-%d")
+          except Exception as e:
+              print(f"⚠️ Date formatting failed for invoice: {invoice.get('invoice_number')}, error: {e}")
+              invoice["invoice_date"] = None
+        
+        print("\nFetched Invoices:")
+        for invoice in invoices:
+          print(json.dumps(invoice, indent=2))
 
+        
 
         if not customers and not vendors:
             messagebox.showwarning("No Data", "No customers or vendors found in Tally.")
@@ -457,7 +661,10 @@ def sync_data():
             send_coa_to_django(accounts)
         if items:
             send_items_to_django(items)
-
+        if invoices:
+          formatted_invoices = format_invoice_data(invoices)
+          send_invoices_to_django(formatted_invoices)
+        status_label.config(text="Syncing data to Django...", fg="blue")
         messagebox.showinfo("Success", "Customers and Vendors synced successfully!")
         status_label.config(text="✅ Sync complete!", fg="green")
 

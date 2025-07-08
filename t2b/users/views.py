@@ -187,6 +187,95 @@ def sync_items(request):
     }, status=status.HTTP_200_OK)
 
 
+# @api_view(['POST'])
+# @permission_classes([IsAuthenticated])
+# def sync_invoices(request):
+#     """
+#     Accepts and stores invoice data from Tally.
+#     """
+    
+#     invoice_data = request.data
+#     if not invoice_data:
+#         return Response({
+#             "error": "No invoice data provided.",
+#             "received_data": request.data  # helps debug what was received
+#         }, status=400)
+
+#     # Example debug print
+#     print("Invoices received:", invoice_data)
+
+#     serializer = InvoiceSerializer(data=invoice_data)
+#     if serializer.is_valid():
+#         # Create the invoice
+#         invoice = Invoice.objects.create(
+#             user=request.user,
+#             customer_name=serializer.validated_data['customer_name'],
+#             invoice_number=serializer.validated_data['invoice_number'],
+#             invoice_date=serializer.validated_data['invoice_date'],
+#             cgst=serializer.validated_data['cgst'],
+#             sgst=serializer.validated_data['sgst'],
+#             total_amount=serializer.validated_data['total_amount']
+#         )
+
+#         # Create the invoice items
+#         for item in serializer.validated_data['items']:
+#             InvoiceItem.objects.create(
+#                 invoice=invoice,
+#                 item_name=item['item_name'],
+#                 quantity=item['quantity'],
+#                 amount=item['amount']
+#             )
+
+#         return Response({"message": "Invoice saved successfully."}, status=201)
+
+#     return Response(serializer.errors, status=400)
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def sync_invoices(request):
+    """
+    Accepts and stores invoice data from Tally.
+    Supports multiple invoices in a single POST.
+    """
+    invoice_data = request.data.get("invoices", [])
+
+    if not invoice_data:
+        return Response({
+            "error": "No invoice data provided.",
+            "received_data": request.data
+        }, status=400)
+
+    for inv in invoice_data:
+        serializer = InvoiceSerializer(data=inv)
+        if serializer.is_valid():
+            invoice = Invoice.objects.update_or_create(
+                user=request.user,
+                customer_name=serializer.validated_data['customer_name'],
+                invoice_number=serializer.validated_data['invoice_number'],
+                invoice_date=serializer.validated_data['invoice_date'],
+                cgst=serializer.validated_data['cgst'],
+                sgst=serializer.validated_data['sgst'],
+                total_amount=serializer.validated_data['total_amount']
+            )
+
+            for item in serializer.validated_data['items']:
+                InvoiceItem.objects.create(
+                    invoice=invoice,
+                    item_name=item['item_name'],
+                    quantity=item['quantity'],
+                    amount=item['amount']
+                )
+        else:
+            return Response({
+                "error": "Invalid invoice",
+                "details": serializer.errors,
+                "invoice": inv
+            }, status=400)
+
+    return Response({"message": "All invoices saved successfully."}, status=201)
+
+
+
 # Send the data to Zoho Books (Optional: Example function)
 def send_to_zoho(ledger_data, access_token):
     """
@@ -281,16 +370,16 @@ def connect_zoho_books(request):
         return Response({"error": "Failed to verify Zoho Books connection.", "details": test_response.json()}, status=400)
 
 
-
-# class CustomAuthToken(ObtainAuthToken):
-#     def post(self, request, *args, **kwargs):
-#         serializer = self.serializer_class(data=request.data,
-#                                            context={'request': request})
-#         if serializer.is_valid():
-#             user = serializer.validated_data['user']
-#             token, created = Token.objects.get_or_create(user=user)
-#             return Response({'token': token.key})
-#         return Response({'error': 'Invalid credentials'}, status=status.HTTP_400_BAD_REQUEST)
+#for agent
+class CustomAuthToken(ObtainAuthToken):
+    def post(self, request, *args, **kwargs):
+        serializer = self.serializer_class(data=request.data,
+                                           context={'request': request})
+        if serializer.is_valid():
+            user = serializer.validated_data['user']
+            token, created = Token.objects.get_or_create(user=user)
+            return Response({'token': token.key})
+        return Response({'error': 'Invalid credentials'}, status=status.HTTP_400_BAD_REQUEST)
 
 from rest_framework.authtoken.views import ObtainAuthToken
 from rest_framework.response import Response
@@ -625,6 +714,72 @@ def push_items_to_zoho(user):
         else:
             print(f"[Failed] {item.name} → Status: {response.status_code} | Response: {response_data}")
 
+from .models import Invoice, InvoiceItem, ZohoBooksCredential
+from .utils import get_valid_zoho_access_token
+import requests
+from django.utils.dateparse import parse_date
+
+def push_invoices_to_zoho(user):
+    access_token, org_id = get_valid_zoho_access_token(user)
+
+    headers = {
+        "Authorization": f"Zoho-oauthtoken {access_token}",
+        "Content-Type": "application/json"
+    }
+
+    base_url = f"https://www.zohoapis.com/books/v3"
+    invoices = Invoice.objects.filter(user=user)
+
+    for invoice in invoices:
+        # Step 1: Fetch contact_id from customer name
+        contact_search_url = f"{base_url}/contacts"
+        params = {
+            "organization_id": org_id,
+            "contact_name": invoice.customer_name
+        }
+        contact_res = requests.get(contact_search_url, headers=headers, params=params)
+        contact_data = contact_res.json()
+
+        if contact_res.status_code != 200 or not contact_data.get("contacts"):
+            print(f"[ERROR] Customer '{invoice.customer_name}' not found in Zoho.")
+            continue
+
+        contact_id = contact_data['contacts'][0]['contact_id']
+
+        # Step 2: Prepare line_items
+        line_items = []
+        for item in invoice.items.all():
+            line_items.append({
+                "name": item.item_name,
+                "rate": float(item.amount),
+                "quantity": 1,  # Optional: parse item.quantity if needed
+            })
+
+        # Step 3: Prepare invoice payload
+        payload = {
+            "customer_id": contact_id,
+            "invoice_number": invoice.invoice_number,
+            "date": invoice.invoice_date.strftime('%Y-%m-%d'),
+            "line_items": line_items,
+            "cgst": float(invoice.cgst),
+            "sgst": float(invoice.sgst),
+        }
+
+        # Step 4: POST to Zoho Books
+        invoice_url = f"{base_url}/invoices?organization_id={org_id}"
+        response = requests.post(invoice_url, headers=headers, json=payload)
+
+        try:
+            data = response.json()
+        except Exception as e:
+            print(f"[ERROR] Invalid JSON for invoice {invoice.invoice_number}: {e}")
+            continue
+
+        if response.status_code == 201:
+            print(f"[SUCCESS] Invoice {invoice.invoice_number} pushed to Zoho.")
+        else:
+            print(f"[FAILED] Invoice {invoice.invoice_number} → {response.status_code}: {data}")
+
 
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
@@ -635,6 +790,7 @@ def push_all_to_zoho(request):
         push_vendors_to_zoho(user)
         push_accounts_to_zoho(user)
         push_items_to_zoho(user)
+        push_invoices_to_zoho(user)
         return Response({"message": "Data pushed to Zoho Books successfully."})
     except Exception as e:
         return Response({"error": str(e)}, status=500)

@@ -110,3 +110,29 @@ class ZohoBooksCredential(models.Model):
     def __str__(self):
         return f"Zoho Credential for {self.user.username}"
 
+
+
+class Invoice(models.Model):
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
+    customer_name = models.CharField(max_length=255)
+    invoice_number = models.CharField(max_length=100)
+    invoice_date = models.DateField()
+    cgst = models.DecimalField(max_digits=10, decimal_places=2, default=0.0)
+    sgst = models.DecimalField(max_digits=10, decimal_places=2, default=0.0)
+    total_amount = models.DecimalField(max_digits=10, decimal_places=2)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ['user', 'invoice_number']
+
+    def __str__(self):
+        return f"Invoice {self.invoice_number} - {self.customer_name}"
+
+class InvoiceItem(models.Model):
+    invoice = models.ForeignKey(Invoice, related_name='items', on_delete=models.CASCADE)
+    item_name = models.CharField(max_length=255)
+    quantity = models.CharField(max_length=50)
+    amount = models.DecimalField(max_digits=10, decimal_places=2)
+
+    def __str__(self):
+        return f"{self.item_name} ({self.quantity})"

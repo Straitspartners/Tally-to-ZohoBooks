@@ -94,3 +94,19 @@ class SetNewPasswordSerializer(serializers.Serializer):
     password = serializers.CharField(write_only=True, validators=[validate_password])
     token = serializers.CharField()
     uidb64 = serializers.CharField()
+
+class InvoiceItemSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = InvoiceItem
+        fields = ['item_name', 'quantity', 'amount']
+
+class InvoiceSerializer(serializers.ModelSerializer):
+    items = InvoiceItemSerializer(many=True)
+
+    class Meta:
+        model = Invoice
+        fields = [
+            'customer_name', 'invoice_number', 'invoice_date',
+            'cgst', 'sgst', 'total_amount', 'items'
+        ]
+
