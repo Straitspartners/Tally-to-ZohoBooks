@@ -20,6 +20,11 @@
 from django.db import models
 from django.conf import settings
 
+class ZohoTax(models.Model):
+    tax_name = models.CharField(max_length=50)
+    tax_percentage = models.DecimalField(max_digits=5, decimal_places=2)
+    zoho_tax_id = models.CharField(max_length=100, null=True, blank=True)
+
 class Ledger(models.Model):
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, null=True)
     name = models.CharField(max_length=255)
@@ -85,6 +90,11 @@ class Item(models.Model):
     product_type = models.CharField(max_length=100, blank=True, null=True)
     account = models.ForeignKey(Account, on_delete=models.SET_NULL, null=True, blank=True)
 
+    gst_applicable = models.CharField(max_length=50, default="Not Applicable")
+    gst_rate = models.DecimalField(max_digits=5, decimal_places=2, default=0.0)
+    hsn_code = models.CharField(max_length=20, blank=True, null=True)
+
+
     def __str__(self):
         return self.name
 
@@ -133,6 +143,7 @@ class InvoiceItem(models.Model):
     item_name = models.CharField(max_length=255)
     quantity = models.CharField(max_length=50)
     amount = models.DecimalField(max_digits=10, decimal_places=2)
+    
 
     def __str__(self):
         return f"{self.item_name} ({self.quantity})"

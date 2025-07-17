@@ -159,16 +159,14 @@ def sync_items(request):
         return Response({"error": "No items provided."}, status=status.HTTP_400_BAD_REQUEST)
 
     created = []
-    errors = []
 
     for item in items_data:
-        # Optional: resolve account by account_code if provided
         account_obj = None
         account_code = item.get("account_code")
         if account_code:
             account_obj = Account.objects.filter(account_code=account_code).first()
 
-        item_obj, created_flag = Item.objects.update_or_create(
+        item_obj, _ = Item.objects.update_or_create(
             user=request.user,
             name=item.get("name"),
             defaults={
@@ -176,7 +174,10 @@ def sync_items(request):
                 "description": item.get("description", ""),
                 "sku": item.get("sku", ""),
                 "product_type": item.get("product_type", ""),
-                "account": account_obj
+                "account": account_obj,
+                "gst_applicable": item.get("gst_applicable", "Not Applicable"),
+                "gst_rate": item.get("gst_rate", 0.0),
+                "hsn_code": item.get("hsn_code", "")
             }
         )
         created.append(item_obj.name)
@@ -230,6 +231,53 @@ def sync_items(request):
 
 #     return Response(serializer.errors, status=400)
 
+# @api_view(['POST'])
+# @permission_classes([IsAuthenticated])
+# def sync_invoices(request):
+#     """
+#     Accepts and stores invoice data from Tally.
+#     Supports multiple invoices in a single POST.
+#     """
+#     invoice_data = request.data.get("invoices", [])
+
+#     if not invoice_data:
+#         return Response({
+#             "error": "No invoice data provided.",
+#             "received_data": request.data
+#         }, status=400)
+
+#     for inv in invoice_data:
+#         serializer = InvoiceSerializer(data=inv)
+#         if serializer.is_valid():
+#             invoice, created = Invoice.objects.update_or_create(
+#                 user=request.user,
+#                 customer_name=serializer.validated_data['customer_name'],
+#                 invoice_number=serializer.validated_data['invoice_number'],
+#                 invoice_date=serializer.validated_data['invoice_date'],
+#                 total_amount=serializer.validated_data['total_amount']
+#             )
+
+#             # Delete existing items before creating new ones
+#             invoice.items.all().delete()
+
+#             for item in serializer.validated_data['items']:
+#                 InvoiceItem.objects.create(
+#                     invoice=invoice,
+#                     item_name=item['item_name'],
+#                     quantity=item['quantity'],
+#                     amount=item['amount'],
+#                     cgst=item.get('cgst', 0.0),
+#                     sgst=item.get('sgst', 0.0),
+#                     tax_type=item.get('tax_type', 'unknown')
+#                 )
+#         else:
+#             return Response({
+#                 "error": "Invalid invoice",
+#                 "details": serializer.errors,
+#                 "invoice": inv
+#             }, status=400)
+
+#     return Response({"message": "All invoices saved successfully."}, status=201)
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def sync_invoices(request):
@@ -248,19 +296,22 @@ def sync_invoices(request):
     for inv in invoice_data:
         serializer = InvoiceSerializer(data=inv)
         if serializer.is_valid():
-            invoice = Invoice.objects.update_or_create(
+            # Unpack result here
+            invoice, created = Invoice.objects.update_or_create(
                 user=request.user,
                 customer_name=serializer.validated_data['customer_name'],
                 invoice_number=serializer.validated_data['invoice_number'],
                 invoice_date=serializer.validated_data['invoice_date'],
-                cgst=serializer.validated_data['cgst'],
-                sgst=serializer.validated_data['sgst'],
-                total_amount=serializer.validated_data['total_amount']
+                defaults={  # use 'defaults' for fields to update
+                    'cgst': serializer.validated_data['cgst'],
+                    'sgst': serializer.validated_data['sgst'],
+                    'total_amount': serializer.validated_data['total_amount']
+                }
             )
 
             for item in serializer.validated_data['items']:
-                InvoiceItem.objects.create(
-                    invoice=invoice,
+                InvoiceItem.objects.get_or_create(
+                    invoice=invoice,  # Now this is a proper Invoice instance
                     item_name=item['item_name'],
                     quantity=item['quantity'],
                     amount=item['amount']
@@ -457,6 +508,87 @@ from .utils import get_valid_zoho_access_token
 
 #         r = requests.post(url, headers=headers, json=data)
 #         print(f"[Customer] {ledger.name} → {r.status_code}", r.json())
+
+import requests
+from .models import ZohoTax
+
+def push_taxes_to_zoho(user):
+    access_token, org_id = get_valid_zoho_access_token(user)
+
+    print("Access Token:", access_token)
+    print("Org ID:", org_id)
+
+    base_url = "https://www.zohoapis.com/books/v3"
+    headers = {
+        "Authorization": f"Zoho-oauthtoken {access_token}",
+        "Content-Type": "application/json"
+    }
+
+    tax_definitions = [
+        {"name": "GST18", "rate": 18.0},
+        {"name": "GST0", "rate": 0.0},
+        {"name": "GST12", "rate": 12.0},
+        {"name": "GST28", "rate": 28.0},
+        {"name": "GST5", "rate": 5.0},
+    ]
+
+    for tax in tax_definitions:
+        tax_name = tax["name"]
+        tax_rate = tax["rate"]
+
+        # Check if the tax already exists in Zoho
+        search_url = f"{base_url}/settings/taxes?organization_id={org_id}"
+        search_response = requests.get(search_url, headers=headers)
+        try:
+            taxes_data = search_response.json()
+        except ValueError:
+            print(f"[Search Failed] Invalid JSON for tax: {tax_name}")
+            continue
+
+        # Skip if tax already exists
+        if search_response.status_code == 200:
+            existing_tax = next((t for t in taxes_data.get("taxes", []) if t["tax_name"] == tax_name), None)
+            if existing_tax:
+                print(f"[Skipped] Tax '{tax_name}' already exists in Zoho.")
+                # Save tax_id to DB if not saved
+                ZohoTax.objects.update_or_create(
+                   
+                    tax_name=tax_name,
+                    defaults={"tax_percentage": tax_rate, "zoho_tax_id": existing_tax["tax_id"]}
+                )
+                continue
+
+        # Create new tax
+        payload = {
+            "tax_name": tax_name,
+            "tax_percentage": tax_rate,
+            "tax_type": "tax"  # or "compound_tax" if applicable
+        }
+
+        response = requests.post(
+            f"{base_url}/settings/taxes?organization_id={org_id}",
+            headers=headers,
+            json=payload
+        )
+
+        try:
+            data = response.json()
+        except ValueError:
+            print(f"[Error] Invalid response when creating tax '{tax_name}'")
+            continue
+
+        if response.status_code == 201:
+            zoho_tax_id = data["tax"]["tax_id"]
+            print(f"[Success] Tax '{tax_name}' created in Zoho with ID: {zoho_tax_id}")
+            # Save in local DB
+            ZohoTax.objects.update_or_create(
+                tax_name=tax_name,
+                defaults={"tax_percentage": tax_rate, "zoho_tax_id": zoho_tax_id}
+            )
+        else:
+            print(f"[Failed] Could not create tax '{tax_name}'. Status: {response.status_code}, Response: {data}")
+
+
 
 import requests
 from .models import Ledger
@@ -674,12 +806,68 @@ def push_vendors_to_zoho(user):
         else:
             print(f"[Failed] Vendor {contact_name} → Status: {response.status_code} | Response: {response_data}")
 
-def push_items_to_zoho(user):
-    from .models import Item
-    access_token, org_id = get_valid_zoho_access_token(user)
 
-    print("Access Token:", access_token)
-    print("Org ID:", org_id)
+def get_or_create_zoho_tax(rate, access_token, org_id):
+    headers = {"Authorization": f"Zoho-oauthtoken {access_token}"}
+    tax_url = f"https://www.zohoapis.com/books/v3/settings/taxes?organization_id={org_id}"
+
+    # Check existing taxes
+    resp = requests.get(tax_url, headers=headers)
+    taxes = resp.json().get("taxes", [])
+    for tax in taxes:
+        if float(tax["tax_percentage"]) == float(rate):
+            return tax["tax_id"]
+
+    # Create new tax
+    data = {"tax_name": f"GST {rate}%", "tax_percentage": rate}
+    resp = requests.post(tax_url, headers=headers, json=data)
+    if resp.status_code == 201:
+        return resp.json()["tax"]["tax_id"]
+
+    return None
+
+# def push_items_to_zoho(user):
+#     from .models import Item
+#     access_token, org_id = get_valid_zoho_access_token(user)
+
+#     items = Item.objects.filter(user=user)
+#     url = f"https://www.zohoapis.com/books/v3/items?organization_id={org_id}"
+#     headers = {
+#         "Authorization": f"Zoho-oauthtoken {access_token}",
+#         "Content-Type": "application/json"
+#     }
+
+#     for item in items:
+#         data = {
+#             "name": item.name,
+#             "rate": float(item.rate),
+#             "description": item.description or "",
+#             "sku": item.sku or "",
+#             "hsn_or_sac": item.hsn_code or "",
+#             "product_type": "goods" if item.product_type.lower() != "service" else "service"
+#         }
+
+#         if item.gst_applicable.lower() == "applicable" and item.gst_rate > 0:
+#             tax_id = get_or_create_zoho_tax(item.gst_rate, access_token, org_id)
+#             if tax_id:
+#                 data["tax_id"] = tax_id
+#         else:
+#             data["taxability"] = "non-taxable"
+
+#         response = requests.post(url, headers=headers, json=data)
+#         try:
+#             response_data = response.json()
+#         except Exception as e:
+#             print(f"[Item Push Error] Invalid response for {item.name}: {e}")
+#             continue
+
+#         if response.status_code == 201:
+#             print(f"[Success] {item.name} pushed successfully.")
+#         else:
+#             print(f"[Failed] {item.name} → {response_data}")
+def push_items_to_zoho(user):
+    from .models import Item, ZohoTax
+    access_token, org_id = get_valid_zoho_access_token(user)
 
     items = Item.objects.filter(user=user)
     url = f"https://www.zohoapis.com/books/v3/items?organization_id={org_id}"
@@ -689,19 +877,18 @@ def push_items_to_zoho(user):
     }
 
     for item in items:
+        zoho_tax = ZohoTax.objects.filter(tax_percentage=item.gst_rate).first()
         data = {
             "name": item.name,
             "rate": float(item.rate),
             "description": item.description or "",
             "sku": item.sku or "",
-            # "product_type": item.product_type or "goods",  # Must be 'goods' or 'service'
+            "hsn_or_sac": item.hsn_code or "",
+            "product_type": "goods" if item.product_type.lower() != "service" else "service",
+            "tax_id": zoho_tax.zoho_tax_id
+            
         }
-
-        # Optionally map account to Zoho "account_id"
-        if item.account:
-            # Here you can extend logic to fetch and map Zoho account_id if needed
-            data["account_id"] = None  # Optional field if you sync Zoho account IDs
-
+        
         response = requests.post(url, headers=headers, json=data)
         try:
             response_data = response.json()
@@ -712,12 +899,16 @@ def push_items_to_zoho(user):
         if response.status_code == 201:
             print(f"[Success] {item.name} pushed successfully.")
         else:
-            print(f"[Failed] {item.name} → Status: {response.status_code} | Response: {response_data}")
+            print(f"[Failed] {item.name} → {response_data}")
+
+        
+
 
 from .models import Invoice, InvoiceItem, ZohoBooksCredential
 from .utils import get_valid_zoho_access_token
 import requests
 from django.utils.dateparse import parse_date
+
 
 def push_invoices_to_zoho(user):
     access_token, org_id = get_valid_zoho_access_token(user)
@@ -753,6 +944,8 @@ def push_invoices_to_zoho(user):
                 "name": item.item_name,
                 "rate": float(item.amount),
                 "quantity": 1,  # Optional: parse item.quantity if needed
+                # "tax_id":6368368000000243025,
+                # "tax_name": "CGST",
             })
 
         # Step 3: Prepare invoice payload
@@ -760,9 +953,12 @@ def push_invoices_to_zoho(user):
             "customer_id": contact_id,
             "invoice_number": invoice.invoice_number,
             "date": invoice.invoice_date.strftime('%Y-%m-%d'),
+            "due_date": invoice.invoice_date.strftime('%Y-%m-%d'),
             "line_items": line_items,
             "cgst": float(invoice.cgst),
             "sgst": float(invoice.sgst),
+            
+            # Do NOT include "status": "sent" here — it is ignored
         }
 
         # Step 4: POST to Zoho Books
@@ -777,6 +973,16 @@ def push_invoices_to_zoho(user):
 
         if response.status_code == 201:
             print(f"[SUCCESS] Invoice {invoice.invoice_number} pushed to Zoho.")
+
+            # Step 5: Mark invoice as sent to change status from "Draft" → "Sent"
+            invoice_id = data['invoice']['invoice_id']
+            mark_sent_url = f"{base_url}/invoices/{invoice_id}/status/sent?organization_id={org_id}"
+            sent_response = requests.post(mark_sent_url, headers=headers)
+
+            if sent_response.status_code == 200:
+                print(f"[SUCCESS] Invoice {invoice.invoice_number} marked as sent.")
+            else:
+                print(f"[WARNING] Could not mark invoice {invoice.invoice_number} as sent → {sent_response.status_code}: {sent_response.text}")
         else:
             print(f"[FAILED] Invoice {invoice.invoice_number} → {response.status_code}: {data}")
 
@@ -786,6 +992,7 @@ def push_invoices_to_zoho(user):
 def push_all_to_zoho(request):
     user = request.user
     try:
+        push_taxes_to_zoho(user)
         push_customers_to_zoho(user)
         push_vendors_to_zoho(user)
         push_accounts_to_zoho(user)

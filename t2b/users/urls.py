@@ -5,6 +5,7 @@ from .views import *
 #     path("sync-ledgers/", sync_ledgers, name="sync_ledgers"),
 # ]
 urlpatterns = [
+    
     path('users/ledgers/', views.sync_ledgers, name='sync_ledgers'),  # Sync ledgers from Tally
     path('generate_token_agent/', CustomAuthToken.as_view(), name='generate_token_agent'), 
     path('generate_token/', EmailOrUsernameAuthToken.as_view(), name='generate_token'), 
@@ -20,8 +21,6 @@ urlpatterns = [
     path('request-reset-email/', RequestPasswordResetEmail.as_view()),
     path('password-reset/<uidb64>/<token>/', PasswordTokenCheckAPI.as_view()),
     path('password-reset-complete/', SetNewPasswordAPIView.as_view()),
-
-  
 
 ]
 

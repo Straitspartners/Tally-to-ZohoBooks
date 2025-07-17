@@ -153,7 +153,6 @@ TALLY_REQUEST_XML_COA = """
   </BODY>
 </ENVELOPE>
 """
-
 TALLY_REQUEST_XML_ITEMS = """
 <ENVELOPE>
   <HEADER>
@@ -171,7 +170,7 @@ TALLY_REQUEST_XML_ITEMS = """
         <TDLMESSAGE>
           <COLLECTION NAME="Stock Items" ISMODIFY="No">
             <TYPE>StockItem</TYPE>
-            <FETCH>NAME, RATE, DESCRIPTION, PARTNUMBER, PARENT</FETCH>
+            <FETCH>NAME, RATE, DESCRIPTION, PARTNUMBER, PARENT, GSTAPPLICABLE, GSTDETAILS.RATE, GSTDETAILS.HSN</FETCH>
           </COLLECTION>
         </TDLMESSAGE>
       </TDL>
@@ -179,6 +178,7 @@ TALLY_REQUEST_XML_ITEMS = """
   </BODY>
 </ENVELOPE>
 """
+
 TALLY_REQUEST_XML_SALES_VOUCHERS = """
 <ENVELOPE>
   <HEADER>
@@ -369,14 +369,14 @@ def parse_coa_ledgers(xml_data):
         logging.error(f"XML Parse Error (COA): {e}")
         raise Exception("Failed to parse COA XML from Tally.")
     
+import xml.etree.ElementTree as ET
+import logging
+
 def parse_items(xml_data):
     items = []
     try:
         xml_data = clean_xml(xml_data)
-        print("Cleaned XML:\n", xml_data)
-
         root = ET.fromstring(xml_data)
-        print("Root tag:", root.tag)
 
         for item in root.findall(".//STOCKITEM"):
             name = item.findtext(".//NAME", default="Unknown")
@@ -384,14 +384,62 @@ def parse_items(xml_data):
             description = item.findtext("DESCRIPTION", default="")
             sku = item.findtext("PARTNUMBER", default="")
             product_type = item.findtext("PARENT", default="General")
+            gst_applicable = item.findtext("GSTAPPLICABLE", default="Not Applicable")
 
+            # Initialize GST fields
+            gst_rate = "0"
+            hsn_code = ""
+
+            # Extract GST details
+            gst_details_list = item.findall("GSTDETAILS.LIST")
+            if gst_details_list:
+                first_gst_detail = gst_details_list[0]
+
+                # Extract HSN
+                hsn_text = first_gst_detail.findtext("HSN")
+                if hsn_text:
+                    hsn_code = hsn_text.strip()
+
+                # Navigate to nested STATEWISEDETAILS
+                statewise_details = first_gst_detail.find("STATEWISEDETAILS.LIST")
+                if statewise_details is not None:
+                    rate_details_list = statewise_details.findall("RATEDETAILS.LIST")
+
+                    # Prefer IGST rate if available
+                    igst_found = False
+                    for rate_detail in rate_details_list:
+                        duty_head = rate_detail.findtext("GSTRATEDUTYHEAD", "").strip()
+                        rate_val = rate_detail.findtext("GSTRATE", "").strip()
+
+                        if duty_head == "IGST" and rate_val:
+                            gst_rate = rate_val
+                            igst_found = True
+                            break  # Found IGST, exit loop
+
+                    # If IGST not found, sum CGST + SGST
+                    if not igst_found:
+                        total = 0
+                        for rate_detail in rate_details_list:
+                            duty_head = rate_detail.findtext("GSTRATEDUTYHEAD", "").strip()
+                            rate_val = rate_detail.findtext("GSTRATE", "").strip()
+                            if duty_head in ("CGST", "SGST/UTGST") and rate_val:
+                                try:
+                                    total += float(rate_val)
+                                except ValueError:
+                                    pass
+                        if total > 0:
+                            gst_rate = str(total)
+
+            # Append parsed item
             items.append({
                 "name": name,
                 "rate": rate,
                 "description": description,
                 "sku": sku,
                 "product_type": product_type,
-                "account_id": None  # Link it later if applicable
+                "gst_applicable": gst_applicable,
+                "gst_rate": gst_rate,
+                "hsn_code": hsn_code
             })
 
         return items
@@ -399,13 +447,12 @@ def parse_items(xml_data):
     except ET.ParseError as e:
         logging.error(f"XML Parse Error (Items): {e}")
         raise Exception("Failed to parse item XML from Tally.")
-    
 
 # def parse_sales_vouchers(xml_data):
 #     invoices = []
 #     try:
 #         xml_data = clean_xml(xml_data)
-#         print(xml_data)
+      
 #         root = ET.fromstring(xml_data)
 
 #         for voucher in root.findall(".//VOUCHER"):
@@ -504,6 +551,7 @@ def parse_sales_vouchers(xml_data):
 
 
 
+
 # ---------------- TALLY SYNC ----------------
 
 def get_tally_data(tally_request_xml):
@@ -580,29 +628,7 @@ def send_invoices_to_django(invoices):
         logging.error(f"Error sending invoices to Django: {e}")
         raise Exception("Failed to send invoices to server.")
 
-from datetime import datetime
 
-def format_invoice_data(invoices):
-    formatted = []
-    for inv in invoices:
-        try:
-            inv["cgst"] = float(inv.get("cgst", 0))
-            inv["sgst"] = float(inv.get("sgst", 0))
-            inv["total_amount"] = float(inv.get("total_amount", 0))
-            # inv["invoice_date"] = datetime.strptime(inv["invoice_date"], "%d-%m-%Y").strftime("%Y-%m-%d")
-            
-            # Fix items too
-            for item in inv.get("items", []):
-                item["amount"] = float(item.get("amount", 0))
-                item["quantity"] = item.get("quantity", "").strip()
-                item["item_name"] = item.get("item_name", "").strip()
-
-            formatted.append(inv)
-
-        except Exception as e:
-            print(f"Skipping invoice due to format error: {inv}, error: {e}")
-    
-    return formatted
 
 
 
@@ -629,6 +655,11 @@ def sync_data():
         # Items
         xml_items = get_tally_data(TALLY_REQUEST_XML_ITEMS)
         items = parse_items(xml_items)
+        for item in items:
+          print("\nFetched Items:")
+        
+          print(json.dumps(item, indent=2))
+
 
         # Invoices
         xml_sales = get_tally_data(TALLY_REQUEST_XML_SALES_VOUCHERS)
@@ -642,9 +673,9 @@ def sync_data():
               print(f"⚠️ Date formatting failed for invoice: {invoice.get('invoice_number')}, error: {e}")
               invoice["invoice_date"] = None
         
-        print("\nFetched Invoices:")
-        for invoice in invoices:
-          print(json.dumps(invoice, indent=2))
+        # print("\nFetched Invoices:")
+        # for invoice in invoices:
+        #   print(json.dumps(invoice, indent=2))
 
         
 
@@ -662,8 +693,8 @@ def sync_data():
         if items:
             send_items_to_django(items)
         if invoices:
-          formatted_invoices = format_invoice_data(invoices)
-          send_invoices_to_django(formatted_invoices)
+      
+          send_invoices_to_django(invoices)
         status_label.config(text="Syncing data to Django...", fg="blue")
         messagebox.showinfo("Success", "Customers and Vendors synced successfully!")
         status_label.config(text="✅ Sync complete!", fg="green")
