@@ -212,6 +212,76 @@ TALLY_REQUEST_XML_SALES_VOUCHERS = """
 </ENVELOPE>
 """
 
+# TALLY_REQUEST_XML_RECEIPTS = """
+# <ENVELOPE>
+#   <HEADER>
+#     <VERSION>1</VERSION>
+#     <TALLYREQUEST>Export</TALLYREQUEST>
+#     <TYPE>Collection</TYPE>
+#     <ID>Receipt Vouchers</ID>
+#   </HEADER>
+#   <BODY>
+#     <DESC>
+#       <STATICVARIABLES>
+#         <SVEXPORTFORMAT>$$SysName:XML</SVEXPORTFORMAT>
+#         <EXPLODEFLAG>Yes</EXPLODEFLAG>
+#         <SVFROMDATE>20240101</SVFROMDATE>
+#         <SVTODATE>20251231</SVTODATE>
+#       </STATICVARIABLES>
+#       <TDL>
+#         <TDLMESSAGE>
+#           <COLLECTION NAME="Receipt Vouchers" ISMODIFY="No">
+#             <TYPE>Voucher</TYPE>
+#             <FILTER>IsReceipt</FILTER>
+#             <FETCH>DATE, VOUCHERNUMBER, LEDGERENTRIES.LIST ,LEDGERENTRIES.LIST.CURRENTBALANCE</FETCH>
+#           </COLLECTION>
+#           <SYSTEM TYPE="Formulae" NAME="IsReceipt">
+#             $VoucherTypeName = "Receipt"
+#           </SYSTEM>
+#         </TDLMESSAGE>
+#       </TDL>
+#     </DESC>
+#   </BODY>
+# </ENVELOPE>
+# """
+
+TALLY_REQUEST_XML_RECEIPTS = """
+<ENVELOPE>
+  <HEADER>
+    <VERSION>1</VERSION>
+    <TALLYREQUEST>Export</TALLYREQUEST>
+    <TYPE>Collection</TYPE>
+    <ID>Receipt Vouchers</ID>
+  </HEADER>
+  <BODY>
+    <DESC>
+      <STATICVARIABLES>
+        <SVEXPORTFORMAT>$$SysName:XML</SVEXPORTFORMAT>
+        <EXPLODEFLAG>Yes</EXPLODEFLAG>
+        <SVFROMDATE>20240101</SVFROMDATE>
+        <SVTODATE>20251231</SVTODATE>
+      </STATICVARIABLES>
+      <TDL>
+        <TDLMESSAGE>
+          <COLLECTION NAME="Receipt Vouchers" ISMODIFY="No">
+            <TYPE>Voucher</TYPE>
+            <FILTER>IsReceipt</FILTER>
+            <FETCH>DATE, VOUCHERNUMBER, LEDGERENTRIES.LIST, LEDGERENTRIES.LIST.AMOUNT, LEDGERENTRIES.LIST.LEDGERNAME, LEDGERENTRIES.LIST.CURRENTBALANCE , LEDGERENTRIES.LIST.BILLALLOCATIONS.LIST.NAME</FETCH>
+          </COLLECTION>
+          <SYSTEM TYPE="Formulae" NAME="IsReceipt">
+            $VoucherTypeName = "Receipt"
+          </SYSTEM>
+        </TDLMESSAGE>
+      </TDL>
+    </DESC>
+  </BODY>
+</ENVELOPE>
+"""
+
+
+
+
+
 # TALLY_TO_ZOHO_ACCOUNT_TYPE = {
 #     "Bank Accounts": "Bank",
 #     "Bank OCC A/c": "Bank",
@@ -552,6 +622,77 @@ def parse_sales_vouchers(xml_data):
 
 
 
+def parse_receipts(xml_data):
+    receipts = []
+
+    # Clean and parse XML
+    xml_data = clean_xml(xml_data)
+    print(xml_data)
+    root = ET.fromstring(xml_data)
+
+    for voucher in root.findall(".//VOUCHER"):
+        receipt_number = voucher.findtext("VOUCHERNUMBER", default="Unknown").strip()
+        date_str = voucher.findtext("DATE", default="").strip()
+
+        try:
+            receipt_date = f"{date_str[0:4]}-{date_str[4:6]}-{date_str[6:8]}"
+        except:
+            receipt_date = date_str
+
+        total_amount = 0.0
+        customer_name = "Unknown"
+        payment_mode = "Unknown"
+        cur_balance = None
+        ref_name = None
+
+        for ledger in voucher.findall(".//ALLLEDGERENTRIES.LIST"):
+            ledger_name = ledger.findtext("LEDGERNAME", default="").strip()
+            amt_str = ledger.findtext("AMOUNT", default="0.0").strip()
+
+            try:
+                amt = float(amt_str)
+            except:
+                amt = 0.0
+
+            # Payment mode: bank/cash
+            if "bank" in ledger_name.lower() or "cash" in ledger_name.lower():
+                payment_mode = ledger_name
+            else:
+                # Customer details
+                customer_name = ledger_name
+                total_amount = amt
+
+                # Get current balance
+                balance_tags = ["CURRENTBALANCE", "LEDGERCLOSINGBALANCE", "CLOSINGBALANCE", "OPENINGBALANCE", "BALANCE"]
+                for tag in balance_tags:
+                    balance_str = ledger.findtext(tag)
+                    if balance_str:
+                        try:
+                            cur_balance = float(balance_str)
+                            break
+                        except:
+                            continue
+
+                # Get Agst Ref Name only from the customer ledger
+                bill_alloc = ledger.find(".//BILLALLOCATIONS.LIST")
+                if bill_alloc is not None:
+                    ref_name = bill_alloc.findtext("NAME", default=None)
+
+        receipts.append({
+            "receipt_number": receipt_number,
+            "customer_name": customer_name,
+            "receipt_date": receipt_date,
+            "amount": f"{abs(total_amount):.2f}",
+            "payment_mode": payment_mode,
+            "cur_balance": f"{cur_balance:.2f}" if cur_balance is not None else None,
+            "agst_ref_name": ref_name
+        })
+
+    return receipts
+
+
+
+
 # ---------------- TALLY SYNC ----------------
 
 def get_tally_data(tally_request_xml):
@@ -628,9 +769,32 @@ def send_invoices_to_django(invoices):
         logging.error(f"Error sending invoices to Django: {e}")
         raise Exception("Failed to send invoices to server.")
 
+def send_receipts_to_django(receipts):
+    try:
+        valid_receipts = []
+        for receipt in receipts:
+            if (
+                receipt.get("customer_name") not in [None, "", "Unknown"]
+                and receipt.get("receipt_number") not in [None, "", "Unknown"]
+                and receipt.get("receipt_date")
+            ):
+                valid_receipts.append(receipt)
+            else:
+                print(f"⚠️ Skipping invalid receipt: {receipt}")
 
+        if not valid_receipts:
+            raise Exception("No valid receipts to send.")
 
-
+        headers = {"Authorization": f"Token {AUTH_TOKEN}"}
+        response = requests.post(
+            "http://127.0.0.1:8000/api/users/receipts/",
+            json={"receipts": valid_receipts},
+            headers=headers
+        )
+        response.raise_for_status()
+    except requests.exceptions.RequestException as e:
+        logging.error(f"Error sending receipts to Django: {e}")
+        raise
 
 
 # ---------------- GUI LOGIC ----------------
@@ -655,10 +819,10 @@ def sync_data():
         # Items
         xml_items = get_tally_data(TALLY_REQUEST_XML_ITEMS)
         items = parse_items(xml_items)
-        for item in items:
-          print("\nFetched Items:")
+        # for item in items:
+        #   print("\nFetched Items:")
         
-          print(json.dumps(item, indent=2))
+        #   print(json.dumps(item, indent=2))
 
 
         # Invoices
@@ -670,19 +834,23 @@ def sync_data():
             if invoice.get("invoice_date"):
               invoice["invoice_date"] = datetime.strptime(invoice["invoice_date"], "%d-%m-%Y").strftime("%Y-%m-%d")
           except Exception as e:
-              print(f"⚠️ Date formatting failed for invoice: {invoice.get('invoice_number')}, error: {e}")
+              # print(f"⚠️ Date formatting failed for invoice: {invoice.get('invoice_number')}, error: {e}")
               invoice["invoice_date"] = None
         
         # print("\nFetched Invoices:")
         # for invoice in invoices:
         #   print(json.dumps(invoice, indent=2))
 
-        
+        # if not customers and not vendors:
+        #     messagebox.showwarning("No Data", "No customers or vendors found in Tally.")
+        #     status_label.config(text="No ledgers found.", fg="orange")
+        #     return
 
-        if not customers and not vendors:
-            messagebox.showwarning("No Data", "No customers or vendors found in Tally.")
-            status_label.config(text="No ledgers found.", fg="orange")
-            return
+        xml_receipts=get_tally_data(TALLY_REQUEST_XML_RECEIPTS)
+        receipts=parse_receipts(xml_receipts)
+        print("\nFetched Receipts:")
+        for receipt in receipts:
+          print(json.dumps(receipt, indent=2))
 
         if customers:
             send_customers_to_django(customers)
@@ -692,9 +860,12 @@ def sync_data():
             send_coa_to_django(accounts)
         if items:
             send_items_to_django(items)
-        if invoices:
-      
-          send_invoices_to_django(invoices)
+        # if invoices:
+        #   send_invoices_to_django(invoices)
+        if receipts:
+          send_receipts_to_django(receipts)
+
+        
         status_label.config(text="Syncing data to Django...", fg="blue")
         messagebox.showinfo("Success", "Customers and Vendors synced successfully!")
         status_label.config(text="✅ Sync complete!", fg="green")

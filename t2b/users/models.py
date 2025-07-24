@@ -40,6 +40,9 @@ class Ledger(models.Model):
     country_name = models.CharField(max_length=100, null=True, blank=True)
     pincode = models.CharField(max_length=10, null=True, blank=True)
 
+    zoho_contact_id = models.CharField(max_length=100, null=True, blank=True)
+
+
     def __str__(self):
         return f"{self.name} - {self.parent}"
 
@@ -62,6 +65,9 @@ class Vendor(models.Model):
     country_name = models.CharField(max_length=100, null=True, blank=True)
     pincode = models.CharField(max_length=10, null=True, blank=True)
 
+    zoho_contact_id = models.CharField(max_length=100, null=True, blank=True)
+
+
     def __str__(self):
         return f"{self.name} - {self.parent}"
 
@@ -77,6 +83,8 @@ class Account(models.Model):
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+
+    
 
     def __str__(self):
         return self.account_name
@@ -131,6 +139,7 @@ class Invoice(models.Model):
     sgst = models.DecimalField(max_digits=10, decimal_places=2, default=0.0)
     total_amount = models.DecimalField(max_digits=10, decimal_places=2)
     created_at = models.DateTimeField(auto_now_add=True)
+    zoho_invoice_id = models.CharField(max_length=100, null=True, blank=True)
 
     class Meta:
         unique_together = ['user', 'invoice_number']
@@ -147,3 +156,30 @@ class InvoiceItem(models.Model):
 
     def __str__(self):
         return f"{self.item_name} ({self.quantity})"
+
+class Receipt(models.Model):
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
+    receipt_number = models.CharField(max_length=100)
+    receipt_date = models.DateField()
+    amount = models.DecimalField(max_digits=10, decimal_places=2)
+    payment_mode = models.CharField(max_length=50)
+
+    customer = models.ForeignKey(Ledger, on_delete=models.SET_NULL, null=True, blank=True)
+    customer_zoho_id = models.CharField(max_length=100, null=True, blank=True)
+
+    agst_invoice = models.ForeignKey(Invoice, on_delete=models.SET_NULL, null=True, blank=True)
+    invoice_zoho_id = models.CharField(max_length=100, null=True, blank=True)
+    invoice_total_amount = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)  # 👈 New field
+
+    zoho_receipt_id = models.CharField(max_length=100, null=True, blank=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ['user', 'receipt_number']
+
+    def __str__(self):
+        return f"Receipt {self.receipt_number} - {self.customer.name if self.customer else 'Unknown'}"
+
+
+

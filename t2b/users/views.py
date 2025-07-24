@@ -325,6 +325,65 @@ def sync_invoices(request):
 
     return Response({"message": "All invoices saved successfully."}, status=201)
 
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def sync_receipts(request):
+    receipts_data = request.data.get("receipts", [])
+
+    if not receipts_data:
+        return Response({"error": "No receipt data provided."}, status=400)
+
+    for entry in receipts_data:
+        receipt_number = entry.get("receipt_number")
+        customer_name = (entry.get("customer_name") or "").strip()
+        receipt_date = entry.get("receipt_date")
+        amount = entry.get("amount")
+        payment_mode = entry.get("payment_mode", "").strip()
+        agst_ref_name = entry.get("agst_ref_name", "").strip()
+
+        if not all([receipt_number, customer_name, receipt_date, amount]):
+            return Response({"error": f"Missing required fields in entry: {entry}"}, status=400)
+
+        customer = Ledger.objects.filter(
+            user=request.user,
+            name__iexact=customer_name
+        ).first()
+
+        if not customer:
+            return Response({
+                "error": f"Customer '{customer_name}' not found in Ledger."
+            }, status=404)
+
+        invoice = None
+        invoice_zoho_id = None
+        invoice_total_amount = None
+
+        if agst_ref_name:
+            invoice = Invoice.objects.filter(
+                user=request.user,
+                invoice_number=agst_ref_name
+            ).first()
+
+            if invoice:
+                invoice_zoho_id = invoice.zoho_invoice_id
+                invoice_total_amount = invoice.total_amount
+
+        receipt, created = Receipt.objects.update_or_create(
+            user=request.user,
+            receipt_number=receipt_number,
+            defaults={
+                "receipt_date": receipt_date,
+                "amount": amount,
+                "payment_mode": payment_mode,
+                "customer": customer,
+                "customer_zoho_id": customer.zoho_contact_id,
+                "agst_invoice": invoice,
+                "invoice_zoho_id": invoice_zoho_id,
+                "invoice_total_amount": invoice_total_amount
+            }
+        )
+
+    return Response({"message": "Receipts synced successfully."}, status=201)
 
 
 # Send the data to Zoho Books (Optional: Example function)
@@ -599,7 +658,7 @@ def push_customers_to_zoho(user):
     print("Access Token:", access_token)
     print("Org ID:", org_id)
 
-    ledgers = Ledger.objects.filter(user=user)
+    ledgers = Ledger.objects.filter(user=user,zoho_contact_id__isnull=True)
     base_url = "https://www.zohoapis.com/books/v3"
     headers = {
         "Authorization": f"Zoho-oauthtoken {access_token}",
@@ -660,6 +719,13 @@ def push_customers_to_zoho(user):
 
         if response.status_code == 201:
             print(f"[Success] {contact_name} pushed successfully.")
+
+            contact_id = response_data['contact']['contact_id']
+
+            # ✅ Save Zoho contact ID locally
+            ledger.zoho_contact_id = contact_id
+            ledger.save(update_fields=["zoho_contact_id"])
+
         else:
             print(f"[Failed] {contact_name} → Status: {response.status_code} | Response: {response_data}")
 
@@ -802,6 +868,9 @@ def push_vendors_to_zoho(user):
             continue
 
         if response.status_code == 201:
+            contact_id = response_data['contact']['contact_id']
+            vendor.zoho_contact_id = contact_id
+            vendor.save(update_fields=["zoho_contact_id"])
             print(f"[Success] Vendor {contact_name} pushed successfully.")
         else:
             print(f"[Failed] Vendor {contact_name} → Status: {response.status_code} | Response: {response_data}")
@@ -919,7 +988,7 @@ def push_invoices_to_zoho(user):
     }
 
     base_url = f"https://www.zohoapis.com/books/v3"
-    invoices = Invoice.objects.filter(user=user)
+    invoices = Invoice.objects.filter(user=user, zoho_invoice_id__isnull=True)
 
     for invoice in invoices:
         # Step 1: Fetch contact_id from customer name
@@ -976,6 +1045,11 @@ def push_invoices_to_zoho(user):
 
             # Step 5: Mark invoice as sent to change status from "Draft" → "Sent"
             invoice_id = data['invoice']['invoice_id']
+
+            # ✅ Save Zoho invoice ID in local DB
+            invoice.zoho_invoice_id = invoice_id
+            invoice.save(update_fields=["zoho_invoice_id"])
+
             mark_sent_url = f"{base_url}/invoices/{invoice_id}/status/sent?organization_id={org_id}"
             sent_response = requests.post(mark_sent_url, headers=headers)
 
@@ -986,18 +1060,78 @@ def push_invoices_to_zoho(user):
         else:
             print(f"[FAILED] Invoice {invoice.invoice_number} → {response.status_code}: {data}")
 
+import requests
+from decimal import Decimal
+import json
+
+
+def push_receipts_to_zoho(user):
+    access_token, org_id = get_valid_zoho_access_token(user)
+    base_url = "https://www.zohoapis.com/books/v3"
+    headers = {
+        "Authorization": f"Zoho-oauthtoken {access_token}",
+        "Content-Type": "application/json"
+    }
+
+    receipts = Receipt.objects.filter(user=user, zoho_receipt_id__isnull=True)
+
+    for receipt in receipts:
+        if not receipt.customer_zoho_id:
+            print(f"[Skipped] Zoho ID missing for customer in receipt {receipt.receipt_number}")
+            continue
+
+        payload = {
+            "customer_id": receipt.customer_zoho_id,
+            "payment_mode": receipt.payment_mode.lower(),
+            "amount": float(receipt.invoice_total_amount),
+            "date": str(receipt.receipt_date)
+        }
+
+        if receipt.invoice_zoho_id:
+            payload["invoices"] = [{
+                "invoice_id": receipt.invoice_zoho_id,
+                "amount_applied": float(receipt.amount)
+            }]
+        # 🔍 Print the payload
+        print(f"\n📤 Payload for receipt {receipt.receipt_number}:")
+        print(json.dumps(payload, indent=2))  # pretty print as JSON
+
+        try:
+            response = requests.post(
+                f"{base_url}/customerpayments?organization_id={org_id}",
+                headers=headers,
+                json=payload
+            )
+            response_data = response.json()
+        except Exception as e:
+            print(f"[Error] Request failed for receipt {receipt.receipt_number}: {e}")
+            continue
+
+        if response.status_code == 201:
+            response_data = response.json()
+            print("🔍 Zoho HTTP Status:", response.status_code)
+            print("🔍 Zoho Response JSON:")
+            print(json.dumps(response_data, indent=2))
+            zoho_payment_id = response_data["payment"]["payment_id"]
+            receipt.zoho_receipt_id = zoho_payment_id
+            receipt.save(update_fields=["zoho_receipt_id"])
+            print(f"[✅ Success] Receipt {receipt.receipt_number} pushed to Zoho. ID: {zoho_payment_id}")
+        else:
+            print(f"[❌ Failed] Receipt {receipt.receipt_number} → {response.status_code} → {response_data}")
+            
 
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def push_all_to_zoho(request):
     user = request.user
     try:
-        push_taxes_to_zoho(user)
-        push_customers_to_zoho(user)
-        push_vendors_to_zoho(user)
-        push_accounts_to_zoho(user)
-        push_items_to_zoho(user)
-        push_invoices_to_zoho(user)
+        # push_taxes_to_zoho(user)
+        # push_customers_to_zoho(user)
+        # push_vendors_to_zoho(user)
+        # push_accounts_to_zoho(user)
+        # push_items_to_zoho(user)
+        # push_invoices_to_zoho(user)
+        push_receipts_to_zoho(user)
         return Response({"message": "Data pushed to Zoho Books successfully."})
     except Exception as e:
         return Response({"error": str(e)}, status=500)
