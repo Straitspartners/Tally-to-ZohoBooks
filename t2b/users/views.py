@@ -1161,12 +1161,18 @@ class TotalRecordsView(APIView):
 
         total_records = total_ledgers + total_vendors + total_accounts + total_items
 
+        total_sales_voucher = Invoice.objects.filter(user=user).count()
+        total_receipts = Receipt.objects.filter(user=user).count()
+
+        total_records_trans = total_sales_voucher + total_receipts 
+
         return Response({
             "ledgers": total_ledgers,
             "vendors": total_vendors,
             "accounts": total_accounts,
             "items": total_items,
-            "total": total_records
+            "total": total_records,
+            "total_trans": total_records_trans
         })
 
 #Quick Migrations Transcations count
