@@ -24,7 +24,8 @@ urlpatterns = [
     path('password-reset/<uidb64>/<token>/', PasswordTokenCheckAPI.as_view()),
     path('password-reset-complete/', SetNewPasswordAPIView.as_view()),
 
-     path('total-records/', TotalRecordsView.as_view(), name='total-records'),
+    path('total-records/', TotalRecordsView.as_view(), name='total-records'),
+    path('total-records-transactions/', TotalRecordsTranscationView.as_view(), name='total-records'),
 
 ]
 
