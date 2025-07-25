@@ -1175,3 +1175,46 @@ class TotalRecordsView(APIView):
             "total_trans": total_records_trans
         })
 
+
+#For the Main Dashboard
+class DataMigrationStatusView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        user = request.user
+
+        # Totals for fetched from Tally
+        tally_ledgers = Ledger.objects.filter(user=user, fetched_from_tally=True).count()
+        tally_vendors = Vendor.objects.filter(user=user, fetched_from_tally=True).count()
+        tally_accounts = Account.objects.filter(user=user, fetched_from_tally=True).count()
+        tally_items = Item.objects.filter(user=user, fetched_from_tally=True).count()
+        tally_invoices=Invoice.objects.filter(user=user,fetched_from_tally=True).count()
+        tally_receipts=Receipt.objects.filter(user=user,fetched_from_tally=True).count()
+
+        # Totals for pushed to Zoho
+        zoho_ledgers = Ledger.objects.filter(user=user, pushed_to_zoho=True).count()
+        zoho_vendors = Vendor.objects.filter(user=user, pushed_to_zoho=True).count()
+        zoho_accounts = Account.objects.filter(user=user, pushed_to_zoho=True).count()
+        zoho_items = Item.objects.filter(user=user, pushed_to_zoho=True).count()
+        zoho_invoices=Invoice.objects.filter(user=user,pushed_to_zoho=True).count()
+        zoho_receipts=Receipt.objects.filter(user=user,pushed_to_zoho=True).count()
+
+        # Pending Zoho Migration
+        pending_ledgers = Ledger.objects.filter(user=user, pushed_to_zoho=False).count()
+        pending_vendors = Vendor.objects.filter(user=user, pushed_to_zoho=False).count()
+        pending_accounts = Account.objects.filter(user=user, pushed_to_zoho=False).count()
+        pending_items = Item.objects.filter(user=user, pushed_to_zoho=False).count()
+        pending_invoices=Invoice.objects.filter(user=user,pushed_to_zoho=False).count()
+        pending_receipts=Receipt.objects.filter(user=user,pushed_to_zoho=False).count()
+
+        return Response({
+            "fetched_from_tally": tally_ledgers + tally_vendors + tally_accounts + tally_items + tally_invoices + tally_receipts ,
+            "migrated_to_zoho": zoho_ledgers + zoho_vendors + zoho_accounts + zoho_items + zoho_invoices + zoho_receipts,
+            "pending_migration_to_zoho": pending_ledgers + pending_vendors + pending_accounts + pending_items + pending_invoices + pending_receipts ,
+            "customers":zoho_ledgers,
+            "vendors":zoho_vendors,
+            "COA":zoho_accounts,
+            "items":zoho_items,
+            "invoices":zoho_invoices,
+            "receipts":zoho_receipts
+        })

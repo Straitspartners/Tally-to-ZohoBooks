@@ -25,7 +25,7 @@ urlpatterns = [
     path('password-reset-complete/', SetNewPasswordAPIView.as_view()),
 
     path('total-records/', TotalRecordsView.as_view(), name='total-records'),
-   
+    path('data-migration-status/', DataMigrationStatusView.as_view(), name='data-migration-status'),
 
 ]
 
