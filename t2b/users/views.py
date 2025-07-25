@@ -1,27 +1,4 @@
 from django.shortcuts import render
-
-# Create your views here.
-# from rest_framework.decorators import api_view, permission_classes
-# from rest_framework.permissions import IsAuthenticated
-# from rest_framework.response import Response
-# from .serializers import LedgerSerializer
-# from .models import Ledger
-
-# @api_view(['POST'])
-# @permission_classes([IsAuthenticated])
-# def sync_ledgers(request):
-#     ledgers = request.data.get("ledgers", [])
-#     for entry in ledgers:
-#         Ledger.objects.update_or_create(
-#             user=request.user,
-#             name=entry.get("name"),
-#             defaults={
-#                 "parent": entry.get("parent"),
-#                 "phone": entry.get("phone")
-#             }
-#         )
-#     return Response({"message": f"{len(ledgers)} ledgers synced successfully."})
-
 from rest_framework.authtoken.views import ObtainAuthToken
 from rest_framework.authtoken.models import Token
 from rest_framework.response import Response
@@ -34,58 +11,55 @@ from .models import *
 from .serializers import *
 import requests
 
-# Sync ledgers from Tally to Django
 @api_view(['POST'])
-@permission_classes([IsAuthenticated])  # Only authenticated users can access
+@permission_classes([IsAuthenticated])
 def sync_ledgers(request):
-    """
-    This endpoint accepts data from the Tally sync agent and stores the ledger information in the database.
-    Expected data: 
-    {
-        "ledgers": [
-            {"name": "Ledger Name", "parent": "Parent Group", "phone": "1000.00"},
-            {"name": "Another Ledger", "parent": "Another Group", "phone": "2000.00"}
-        ]
-    }
-    """
-    # Data should come in a list under the "ledgers" key
     ledgers = request.data.get("ledgers", [])
-
-    # If no ledgers are sent in the request, return an error
     if not ledgers:
         return Response({"error": "No ledgers provided in the request."}, status=status.HTTP_400_BAD_REQUEST)
 
-    # Process each ledger
+    synced_count = 0
     for entry in ledgers:
-        # Check if required fields are present
-        if not entry.get('name'):
-            return Response({"error": "Ledger name is required."}, status=status.HTTP_400_BAD_REQUEST)
+        name = entry.get('name')
+        if not name:
+            continue  # skip entries without a name
 
-        # Update or create the ledger in the database
-        Ledger.objects.update_or_create(
-            user=request.user,  # Link the ledger to the authenticated user
-            name=entry.get("name"),
-            # defaults={
-            #      "parent": entry.get("parent", ""),
-            #      "phone": entry.get("phone", None),
-            #      "email": entry.get("email", None),
-            #      "address": entry.get("address", None) 
-            # }
-            defaults = {
-    "parent": entry.get("parent", ""),
-    "email": entry.get("email", None),
-    "address": entry.get("address", None),
-    "ledger_mobile": entry.get("ledger_mobile", None),
-    "website": entry.get("website", None),
-    "state_name": entry.get("state_name", None),
-    "country_name": entry.get("country_name", None),
-    "pincode": entry.get("pincode", None),
-}
+        # Check for existing ledger
+        ledger_qs = Ledger.objects.filter(user=request.user, name=name)
+        if ledger_qs.exists():
+            ledger = ledger_qs.first()
+            if not ledger.fetched_from_tally:
+                # Update only if not yet fetched
+                ledger.parent = entry.get("parent", "")
+                ledger.email = entry.get("email", None)
+                ledger.address = entry.get("address", None)
+                ledger.ledger_mobile = entry.get("ledger_mobile", None)
+                ledger.website = entry.get("website", None)
+                ledger.state_name = entry.get("state_name", None)
+                ledger.country_name = entry.get("country_name", None)
+                ledger.pincode = entry.get("pincode", None)
+                ledger.fetched_from_tally = True
+                ledger.save()
+                synced_count += 1
+            # else, already fetched, skip
+        else:
+            # Create new ledger and mark as fetched
+            Ledger.objects.create(
+                user=request.user,
+                name=name,
+                parent=entry.get("parent", ""),
+                email=entry.get("email", None),
+                address=entry.get("address", None),
+                ledger_mobile=entry.get("ledger_mobile", None),
+                website=entry.get("website", None),
+                state_name=entry.get("state_name", None),
+                country_name=entry.get("country_name", None),
+                pincode=entry.get("pincode", None),
+                fetched_from_tally=True
+            )
+            synced_count += 1
 
-        )
-
-    # Return a success message
-    return Response({"message": f"{len(ledgers)} ledgers synced successfully."}, status=status.HTTP_200_OK)
+    return Response({"message": f"{synced_count} ledgers synced successfully."}, status=status.HTTP_200_OK)
 
 
 # views.py (add below sync_ledgers)
@@ -93,38 +67,55 @@ def sync_ledgers(request):
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def sync_vendors(request):
-    """
-    Accepts and stores vendor information in the database.
-    Endpoint: /api/users/ledgers/vendors/
-    """
     vendors = request.data.get("ledgers", [])
-
     if not vendors:
         return Response({"error": "No vendors provided in the request."}, status=status.HTTP_400_BAD_REQUEST)
 
+    synced_count = 0
     for entry in vendors:
-        if not entry.get('name'):
-            return Response({"error": "Vendor name is required."}, status=status.HTTP_400_BAD_REQUEST)
+        name = entry.get('name')
+        if not name:
+            continue
 
-        # Update or create vendor
-        Vendor.objects.update_or_create(
-            user=request.user,
-            name=entry.get("name"),
-            defaults={
-                "parent": entry.get("parent", ""),
-                "email": entry.get("email", None),
-                "address": entry.get("address", None),
-                "ledger_mobile": entry.get("ledger_mobile", None),
-                "website": entry.get("website", None),
-                "state_name": entry.get("state_name", None),
-                "country_name": entry.get("country_name", None),
-                "pincode": entry.get("pincode", None),
-            }
-        )
+        vendor_qs = Vendor.objects.filter(user=request.user, name=name)
+        if vendor_qs.exists():
+            vendor = vendor_qs.first()
+            if not vendor.fetched_from_tally:
+                vendor.parent = entry.get("parent", "")
+                vendor.email = entry.get("email", None)
+                vendor.address = entry.get("address", None)
+                vendor.ledger_mobile = entry.get("ledger_mobile", None)
+                vendor.website = entry.get("website", None)
+                vendor.state_name = entry.get("state_name", None)
+                vendor.country_name = entry.get("country_name", None)
+                vendor.pincode = entry.get("pincode", None)
+                vendor.fetched_from_tally = True
+                vendor.save()
+                synced_count += 1
+        else:
+            Vendor.objects.create(
+                user=request.user,
+                name=name,
+                parent=entry.get("parent", ""),
+                email=entry.get("email", None),
+                address=entry.get("address", None),
+                ledger_mobile=entry.get("ledger_mobile", None),
+                website=entry.get("website", None),
+                state_name=entry.get("state_name", None),
+                country_name=entry.get("country_name", None),
+                pincode=entry.get("pincode", None),
+                fetched_from_tally=True
+            )
+            synced_count += 1
 
-    return Response({"message": f"{len(vendors)} vendors synced successfully."}, status=status.HTTP_200_OK)
+    return Response({"message": f"{synced_count} vendors synced successfully."}, status=status.HTTP_200_OK)
 
+from rest_framework import permissions, status
 from rest_framework.views import APIView
+from rest_framework.response import Response
+from .models import Account
+from .serializers import AccountSerializer
+
 class AccountSyncView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
@@ -136,12 +127,36 @@ class AccountSyncView(APIView):
         for account_data in accounts_data:
             serializer = AccountSerializer(data=account_data)
             if serializer.is_valid():
-                # Avoid duplicates using account_code
-                obj, created_flag = Account.objects.update_or_create(
-                    account_code=account_data["account_code"],
-                    defaults=serializer.validated_data
-                )
-                created.append(obj.account_code)
+                account_code = account_data.get("account_code")
+                if not account_code:
+                    errors.append({"error": "Missing account_code in data", "data": account_data})
+                    continue
+
+                # Check for existing account with account_code
+                try:
+                    account_obj = Account.objects.get(user=request.user, account_code=account_code)
+                    # Update only if not yet fetched from tally
+                    if not account_obj.fetched_from_tally:
+                        # Update fields with validated data
+                        for attr, value in serializer.validated_data.items():
+                            setattr(account_obj, attr, value)
+                        account_obj.fetched_from_tally = True
+                        account_obj.save()
+                        created.append(account_obj.account_code)
+                    else:
+                        # Already fetched, skip update
+                        pass
+                except Account.DoesNotExist:
+                    # Create new if not exists
+                    account_obj = Account.objects.create(
+                        user=request.user,
+                        account_name=serializer.validated_data.get("account_name", ""),
+                        account_code=serializer.validated_data.get("account_code", ""),
+                        account_type=serializer.validated_data.get("account_type", ""),
+                        zoho_account_id=serializer.validated_data.get("zoho_account_id", ""),
+                        fetched_from_tally=True
+                    )
+                    created.append(account_obj.account_code)
             else:
                 errors.append(serializer.errors)
 
@@ -149,189 +164,139 @@ class AccountSyncView(APIView):
             "created": created,
             "errors": errors
         }, status=status.HTTP_201_CREATED if not errors else status.HTTP_207_MULTI_STATUS)
+
     
 
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def sync_items(request):
-    items_data = request.data.get("items", [])
-    if not items_data:
+    items = request.data.get("items", [])
+    if not items:
         return Response({"error": "No items provided."}, status=status.HTTP_400_BAD_REQUEST)
 
-    created = []
+    synced_items = []
 
-    for item in items_data:
-        account_obj = None
+    for item in items:
+        name = item.get("name")
         account_code = item.get("account_code")
-        if account_code:
-            account_obj = Account.objects.filter(account_code=account_code).first()
 
-        item_obj, _ = Item.objects.update_or_create(
-            user=request.user,
-            name=item.get("name"),
-            defaults={
-                "rate": item.get("rate", 0.0),
-                "description": item.get("description", ""),
-                "sku": item.get("sku", ""),
-                "product_type": item.get("product_type", ""),
-                "account": account_obj,
-                "gst_applicable": item.get("gst_applicable", "Not Applicable"),
-                "gst_rate": item.get("gst_rate", 0.0),
-                "hsn_code": item.get("hsn_code", "")
-            }
-        )
-        created.append(item_obj.name)
+        # Find existing Item by name for the user
+        item_qs = Item.objects.filter(user=request.user, name=name)
+        if item_qs.exists():
+            item_obj = item_qs.first()
+            if not item_obj.fetched_from_tally:
+                # Update only if not yet fetched
+                account_obj = None
+                if account_code:
+                    account_obj = Account.objects.filter(user=request.user, account_code=account_code).first()
+                item_obj.rate = item.get("rate", 0.0)
+                item_obj.description = item.get("description", "")
+                item_obj.sku = item.get("sku", "")
+                item_obj.product_type = item.get("product_type", "")
+                item_obj.account = account_obj
+                item_obj.gst_applicable = item.get("gst_applicable", "Not Applicable")
+                item_obj.gst_rate = item.get("gst_rate", 0.0)
+                item_obj.hsn_code = item.get("hsn_code", "")
+                # Keep fetched_from_tally True after initial fetch
+                item_obj.fetched_from_tally = True
+                item_obj.save()
+                synced_items.append(item_obj.name)
+            # else, already fetched, skip
+        else:
+            # Create new item
+            account_obj = None
+            if account_code:
+                account_obj = Account.objects.filter(user=request.user, account_code=account_code).first()
+            item_obj = Item.objects.create(
+                user=request.user,
+                name=name,
+                rate=item.get("rate", 0.0),
+                description=item.get("description", ""),
+                sku=item.get("sku", ""),
+                product_type=item.get("product_type", ""),
+                account=account_obj,
+                gst_applicable=item.get("gst_applicable", "Not Applicable"),
+                gst_rate=item.get("gst_rate", 0.0),
+                hsn_code=item.get("hsn_code", ""),
+                fetched_from_tally=True
+            )
+            synced_items.append(item_obj.name)
 
     return Response({
-        "message": f"{len(created)} items synced successfully.",
-        "items": created
+        "message": f"{len(synced_items)} items synced successfully.",
+        "items": synced_items
     }, status=status.HTTP_200_OK)
 
 
-# @api_view(['POST'])
-# @permission_classes([IsAuthenticated])
-# def sync_invoices(request):
-#     """
-#     Accepts and stores invoice data from Tally.
-#     """
-    
-#     invoice_data = request.data
-#     if not invoice_data:
-#         return Response({
-#             "error": "No invoice data provided.",
-#             "received_data": request.data  # helps debug what was received
-#         }, status=400)
-
-#     # Example debug print
-#     print("Invoices received:", invoice_data)
-
-#     serializer = InvoiceSerializer(data=invoice_data)
-#     if serializer.is_valid():
-#         # Create the invoice
-#         invoice = Invoice.objects.create(
-#             user=request.user,
-#             customer_name=serializer.validated_data['customer_name'],
-#             invoice_number=serializer.validated_data['invoice_number'],
-#             invoice_date=serializer.validated_data['invoice_date'],
-#             cgst=serializer.validated_data['cgst'],
-#             sgst=serializer.validated_data['sgst'],
-#             total_amount=serializer.validated_data['total_amount']
-#         )
-
-#         # Create the invoice items
-#         for item in serializer.validated_data['items']:
-#             InvoiceItem.objects.create(
-#                 invoice=invoice,
-#                 item_name=item['item_name'],
-#                 quantity=item['quantity'],
-#                 amount=item['amount']
-#             )
-
-#         return Response({"message": "Invoice saved successfully."}, status=201)
-
-#     return Response(serializer.errors, status=400)
-
-# @api_view(['POST'])
-# @permission_classes([IsAuthenticated])
-# def sync_invoices(request):
-#     """
-#     Accepts and stores invoice data from Tally.
-#     Supports multiple invoices in a single POST.
-#     """
-#     invoice_data = request.data.get("invoices", [])
-
-#     if not invoice_data:
-#         return Response({
-#             "error": "No invoice data provided.",
-#             "received_data": request.data
-#         }, status=400)
-
-#     for inv in invoice_data:
-#         serializer = InvoiceSerializer(data=inv)
-#         if serializer.is_valid():
-#             invoice, created = Invoice.objects.update_or_create(
-#                 user=request.user,
-#                 customer_name=serializer.validated_data['customer_name'],
-#                 invoice_number=serializer.validated_data['invoice_number'],
-#                 invoice_date=serializer.validated_data['invoice_date'],
-#                 total_amount=serializer.validated_data['total_amount']
-#             )
-
-#             # Delete existing items before creating new ones
-#             invoice.items.all().delete()
-
-#             for item in serializer.validated_data['items']:
-#                 InvoiceItem.objects.create(
-#                     invoice=invoice,
-#                     item_name=item['item_name'],
-#                     quantity=item['quantity'],
-#                     amount=item['amount'],
-#                     cgst=item.get('cgst', 0.0),
-#                     sgst=item.get('sgst', 0.0),
-#                     tax_type=item.get('tax_type', 'unknown')
-#                 )
-#         else:
-#             return Response({
-#                 "error": "Invalid invoice",
-#                 "details": serializer.errors,
-#                 "invoice": inv
-#             }, status=400)
-
-#     return Response({"message": "All invoices saved successfully."}, status=201)
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def sync_invoices(request):
-    """
-    Accepts and stores invoice data from Tally.
-    Supports multiple invoices in a single POST.
-    """
-    invoice_data = request.data.get("invoices", [])
+    invoices_data = request.data.get("invoices", [])
+    if not invoices_data:
+        return Response({"error": "No invoice data provided."}, status=status.HTTP_400_BAD_REQUEST)
 
-    if not invoice_data:
-        return Response({
-            "error": "No invoice data provided.",
-            "received_data": request.data
-        }, status=400)
+    saved_invoices = []
 
-    for inv in invoice_data:
+    for inv in invoices_data:
         serializer = InvoiceSerializer(data=inv)
         if serializer.is_valid():
-            # Unpack result here
-            invoice, created = Invoice.objects.update_or_create(
+            invoice_qs = Invoice.objects.filter(
                 user=request.user,
-                customer_name=serializer.validated_data['customer_name'],
-                invoice_number=serializer.validated_data['invoice_number'],
-                invoice_date=serializer.validated_data['invoice_date'],
-                defaults={  # use 'defaults' for fields to update
-                    'cgst': serializer.validated_data['cgst'],
-                    'sgst': serializer.validated_data['sgst'],
-                    'total_amount': serializer.validated_data['total_amount']
-                }
+                invoice_number=serializer.validated_data['invoice_number']
             )
-
+            if invoice_qs.exists():
+                invoice = invoice_qs.first()
+                if not invoice.fetched_from_tally:
+                    # Update existing invoice
+                    invoice.customer_name = serializer.validated_data['customer_name']
+                    invoice.invoice_date = serializer.validated_data['invoice_date']
+                    invoice.cgst = serializer.validated_data['cgst']
+                    invoice.sgst = serializer.validated_data['sgst']
+                    invoice.total_amount = serializer.validated_data['total_amount']
+                    invoice.fetched_from_tally = True
+                    invoice.save()
+            else:
+                # Create new invoice
+                invoice = Invoice.objects.create(
+                    user=request.user,
+                    customer_name=serializer.validated_data['customer_name'],
+                    invoice_number=serializer.validated_data['invoice_number'],
+                    invoice_date=serializer.validated_data['invoice_date'],
+                    cgst=serializer.validated_data['cgst'],
+                    sgst=serializer.validated_data['sgst'],
+                    total_amount=serializer.validated_data['total_amount'],
+                    fetched_from_tally=True
+                )
+            # Save invoice items
             for item in serializer.validated_data['items']:
                 InvoiceItem.objects.get_or_create(
-                    invoice=invoice,  # Now this is a proper Invoice instance
+                    invoice=invoice,
                     item_name=item['item_name'],
                     quantity=item['quantity'],
-                    amount=item['amount']
+                    amount=item['amount'],
+                    defaults={'fetched_from_tally': True}
                 )
+            if invoice.fetched_from_tally:
+                saved_invoices.append(invoice.invoice_number)
         else:
             return Response({
                 "error": "Invalid invoice",
                 "details": serializer.errors,
                 "invoice": inv
-            }, status=400)
+            }, status=status.HTTP_400_BAD_REQUEST)
 
-    return Response({"message": "All invoices saved successfully."}, status=201)
+    return Response({"message": f"{len(saved_invoices)} invoices synced successfully."}, status=status.HTTP_201_CREATED)
+
 
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def sync_receipts(request):
     receipts_data = request.data.get("receipts", [])
-
     if not receipts_data:
-        return Response({"error": "No receipt data provided."}, status=400)
+        return Response({"error": "No receipt data provided."}, status=status.HTTP_400_BAD_REQUEST)
+
+    synced_count = 0
+    processed_receipts = []
 
     for entry in receipts_data:
         receipt_number = entry.get("receipt_number")
@@ -341,49 +306,73 @@ def sync_receipts(request):
         payment_mode = entry.get("payment_mode", "").strip()
         agst_ref_name = entry.get("agst_ref_name", "").strip()
 
+        # Validate required fields
         if not all([receipt_number, customer_name, receipt_date, amount]):
-            return Response({"error": f"Missing required fields in entry: {entry}"}, status=400)
+            continue  # skip invalid entries
 
+        # Check if customer (Ledger) exists
         customer = Ledger.objects.filter(
             user=request.user,
             name__iexact=customer_name
         ).first()
-
         if not customer:
-            return Response({
-                "error": f"Customer '{customer_name}' not found in Ledger."
-            }, status=404)
+            continue  # skip if customer not found
 
         invoice = None
         invoice_zoho_id = None
         invoice_total_amount = None
 
         if agst_ref_name:
+            # Find related invoice
             invoice = Invoice.objects.filter(
                 user=request.user,
                 invoice_number=agst_ref_name
             ).first()
-
             if invoice:
                 invoice_zoho_id = invoice.zoho_invoice_id
                 invoice_total_amount = invoice.total_amount
 
-        receipt, created = Receipt.objects.update_or_create(
+        # Check if receipt already exists
+        receipt_qs = Receipt.objects.filter(
             user=request.user,
-            receipt_number=receipt_number,
-            defaults={
-                "receipt_date": receipt_date,
-                "amount": amount,
-                "payment_mode": payment_mode,
-                "customer": customer,
-                "customer_zoho_id": customer.zoho_contact_id,
-                "agst_invoice": invoice,
-                "invoice_zoho_id": invoice_zoho_id,
-                "invoice_total_amount": invoice_total_amount
-            }
+            receipt_number=receipt_number
         )
 
-    return Response({"message": "Receipts synced successfully."}, status=201)
+        if receipt_qs.exists():
+            receipt = receipt_qs.first()
+            if not receipt.fetched_from_tally:
+                # Update existing Receipt
+                receipt.receipt_date = receipt_date
+                receipt.amount = amount
+                receipt.payment_mode = payment_mode
+                receipt.customer = customer
+                receipt.customer_zoho_id = customer.zoho_contact_id
+                receipt.agst_invoice = invoice
+                receipt.invoice_zoho_id = invoice_zoho_id
+                receipt.invoice_total_amount = invoice_total_amount
+                receipt.fetched_from_tally = True
+                receipt.save()
+                synced_count += 1
+        else:
+            # Create new receipt
+            Receipt.objects.create(
+                user=request.user,
+                receipt_number=receipt_number,
+                receipt_date=receipt_date,
+                amount=amount,
+                payment_mode=payment_mode,
+                customer=customer,
+                customer_zoho_id=customer.zoho_contact_id,
+                agst_invoice=invoice,
+                invoice_zoho_id=invoice_zoho_id,
+                invoice_total_amount=invoice_total_amount,
+                fetched_from_tally=True
+            )
+            synced_count += 1
+        processed_receipts.append(receipt_number)
+
+    return Response({"message": f"{synced_count} receipts synced successfully."}, status=status.HTTP_201_CREATED)
+
 
 
 # Send the data to Zoho Books (Optional: Example function)
@@ -528,45 +517,6 @@ class EmailOrUsernameAuthToken(ObtainAuthToken):
 from .utils import get_valid_zoho_access_token
 
 
-# def push_customers_to_zoho(user):
-#     from .models import Ledger
-#     access_token, org_id = get_valid_zoho_access_token(user)
-
-#     # Debug print
-#     print("Access Token:", access_token)
-#     print("Org ID:", org_id)
-
-
-#     ledgers = Ledger.objects.filter(user=user)
-#     url = f"https://www.zohoapis.com/books/v3/contacts?organization_id={org_id}"
-#     headers = {
-#         "Authorization": f"Zoho-oauthtoken {access_token}",
-#         "Content-Type": "application/json"
-#     }
-
-#     for ledger in ledgers:
-#         data = {
-#             "contact_name": ledger.name,
-#             "company_name": ledger.name,
-#             "email": ledger.email or f"{ledger.name.replace(' ', '').lower()}@exasdmple.com",
-#             "billing_address": {
-#                 "address": ledger.address or "",
-#                 "zip": ledger.pincode or "",
-#                 "state": ledger.state_name or "",
-#                 "country": ledger.country_name or ""
-#             },
-#             "contact_persons": [
-#                 {
-#                     "first_name": ledger.name,
-#                     "email": ledger.email or f"{ledger.name.replace(' ', '').lower()}@exdsample.com",
-#                     # "email": ledger.email,
-#                     "phone": ledger.ledger_mobile or "",
-#                 }
-#             ]
-#         }
-
-#         r = requests.post(url, headers=headers, json=data)
-#         print(f"[Customer] {ledger.name} → {r.status_code}", r.json())
 
 import requests
 from .models import ZohoTax
@@ -613,7 +563,7 @@ def push_taxes_to_zoho(user):
                 ZohoTax.objects.update_or_create(
                    
                     tax_name=tax_name,
-                    defaults={"tax_percentage": tax_rate, "zoho_tax_id": existing_tax["tax_id"]}
+                    defaults={"tax_percentage": tax_rate, "zoho_tax_id": existing_tax["tax_id"],"pushed_to_zoho": True}
                 )
                 continue
 
@@ -658,7 +608,7 @@ def push_customers_to_zoho(user):
     print("Access Token:", access_token)
     print("Org ID:", org_id)
 
-    ledgers = Ledger.objects.filter(user=user,zoho_contact_id__isnull=True)
+    ledgers = Ledger.objects.filter(user=user,zoho_contact_id__isnull=True, pushed_to_zoho=False)
     base_url = "https://www.zohoapis.com/books/v3"
     headers = {
         "Authorization": f"Zoho-oauthtoken {access_token}",
@@ -724,12 +674,11 @@ def push_customers_to_zoho(user):
 
             # ✅ Save Zoho contact ID locally
             ledger.zoho_contact_id = contact_id
-            ledger.save(update_fields=["zoho_contact_id"])
+            ledger.pushed_to_zoho = True
+            ledger.save(update_fields=["zoho_contact_id", "pushed_to_zoho"])
 
         else:
             print(f"[Failed] {contact_name} → Status: {response.status_code} | Response: {response_data}")
-
-
 
 
 def push_accounts_to_zoho(user):
@@ -740,7 +689,7 @@ def push_accounts_to_zoho(user):
     print("Access Token:", access_token)
     print("Org ID:", org_id)
 
-    accounts = Account.objects.all()
+    accounts = Account.objects.filter(pushed_to_zoho=False)
     url = f"https://www.zohoapis.com/books/v3/chartofaccounts?organization_id={org_id}"
     headers = {
         "Authorization": f"Zoho-oauthtoken {access_token}"
@@ -760,46 +709,12 @@ def push_accounts_to_zoho(user):
         if r.status_code == 201:  # Successfully created
             zoho_account_id = response_data['chart_of_account']['account_id']
             account.zoho_account_id = zoho_account_id  # assumes your model has this field
-            account.save()
+            account.pushed_to_zoho = True
+            account.save(update_fields=["zoho_account_id", "pushed_to_zoho"])
             print(f"[Account] {account.account_name} → Created in Zoho with ID {zoho_account_id}")
         else:
             print(f"[Error] Failed to create {account.account_name} →", response_data)
 
-# def push_vendors_to_zoho(user):
-#     from .models import Vendor
-#     import requests
-
-#     access_token, org_id = get_valid_zoho_access_token(user)
-#     print("Access Token:", access_token)
-#     print("Org ID:", org_id)
-
-#     vendors = Vendor.objects.filter(user=user)
-#     url = "https://www.zohoapis.com/books/v3/contacts"
-#     headers = {
-#         "Authorization": f"Zoho-oauthtoken {access_token}",
-#         "Content-Type": "application/json"
-#     }
-#     params = {
-#         "organization_id": org_id
-#     }
-
-#     for vendor in vendors:
-#         data = {
-#             "contact_type": "vendor",  # Specify contact type as vendor
-#             "contact_name": vendor.name,
-#             "vendor_name": vendor.name,
-#             "email": vendor.email or f"{vendor.name.replace(' ', '').lower()}@example.com",
-#             "billing_address": {
-#                 "address": vendor.address or "",
-#                 "zip": vendor.pincode or "",
-#                 "state": vendor.state_name or "",
-#                 "country": vendor.country_name or ""
-#             },
-#             "phone": vendor.ledger_mobile or ""
-#         }
-
-#         r = requests.post(url, headers=headers, params=params, json=data)
-#         print(f"[Vendor] {vendor.name} → {r.status_code}", r.json())
 
 def push_vendors_to_zoho(user):
     from .models import Vendor
@@ -809,7 +724,7 @@ def push_vendors_to_zoho(user):
     print("Access Token:", access_token)
     print("Org ID:", org_id)
 
-    vendors = Vendor.objects.filter(user=user)
+    vendors = Vendor.objects.filter(user=user,pushed_to_zoho=False)
     base_url = "https://www.zohoapis.com/books/v3"
     headers = {
         "Authorization": f"Zoho-oauthtoken {access_token}",
@@ -870,7 +785,8 @@ def push_vendors_to_zoho(user):
         if response.status_code == 201:
             contact_id = response_data['contact']['contact_id']
             vendor.zoho_contact_id = contact_id
-            vendor.save(update_fields=["zoho_contact_id"])
+            vendor.pushed_to_zoho = True
+            vendor.save(update_fields=["zoho_contact_id", "pushed_to_zoho"])
             print(f"[Success] Vendor {contact_name} pushed successfully.")
         else:
             print(f"[Failed] Vendor {contact_name} → Status: {response.status_code} | Response: {response_data}")
@@ -938,7 +854,7 @@ def push_items_to_zoho(user):
     from .models import Item, ZohoTax
     access_token, org_id = get_valid_zoho_access_token(user)
 
-    items = Item.objects.filter(user=user)
+    items = Item.objects.filter(user=user,pushed_to_zoho=False)
     url = f"https://www.zohoapis.com/books/v3/items?organization_id={org_id}"
     headers = {
         "Authorization": f"Zoho-oauthtoken {access_token}",
@@ -966,6 +882,8 @@ def push_items_to_zoho(user):
             continue
 
         if response.status_code == 201:
+            item.pushed_to_zoho = True
+            item.save(update_fields=["pushed_to_zoho"])
             print(f"[Success] {item.name} pushed successfully.")
         else:
             print(f"[Failed] {item.name} → {response_data}")
@@ -988,7 +906,7 @@ def push_invoices_to_zoho(user):
     }
 
     base_url = f"https://www.zohoapis.com/books/v3"
-    invoices = Invoice.objects.filter(user=user, zoho_invoice_id__isnull=True)
+    invoices = Invoice.objects.filter(user=user, zoho_invoice_id__isnull=True,pushed_to_zoho=False)
 
     for invoice in invoices:
         # Step 1: Fetch contact_id from customer name
@@ -1048,7 +966,8 @@ def push_invoices_to_zoho(user):
 
             # ✅ Save Zoho invoice ID in local DB
             invoice.zoho_invoice_id = invoice_id
-            invoice.save(update_fields=["zoho_invoice_id"])
+            invoice.pushed_to_zoho = True
+            invoice.save(update_fields=["zoho_invoice_id", "pushed_to_zoho"])
 
             mark_sent_url = f"{base_url}/invoices/{invoice_id}/status/sent?organization_id={org_id}"
             sent_response = requests.post(mark_sent_url, headers=headers)
@@ -1073,7 +992,7 @@ def push_receipts_to_zoho(user):
         "Content-Type": "application/json"
     }
 
-    receipts = Receipt.objects.filter(user=user, zoho_receipt_id__isnull=True)
+    receipts = Receipt.objects.filter(user=user, zoho_receipt_id__isnull=True,pushed_to_zoho=False)
 
     for receipt in receipts:
         if not receipt.customer_zoho_id:
@@ -1114,7 +1033,8 @@ def push_receipts_to_zoho(user):
             print(json.dumps(response_data, indent=2))
             zoho_payment_id = response_data["payment"]["payment_id"]
             receipt.zoho_receipt_id = zoho_payment_id
-            receipt.save(update_fields=["zoho_receipt_id"])
+            receipt.pushed_to_zoho = True
+            receipt.save(update_fields=["zoho_receipt_id", "pushed_to_zoho"])
             print(f"[✅ Success] Receipt {receipt.receipt_number} pushed to Zoho. ID: {zoho_payment_id}")
         else:
             print(f"[❌ Failed] Receipt {receipt.receipt_number} → {response.status_code} → {response_data}")
@@ -1125,12 +1045,12 @@ def push_receipts_to_zoho(user):
 def push_all_to_zoho(request):
     user = request.user
     try:
-        # push_taxes_to_zoho(user)
-        # push_customers_to_zoho(user)
-        # push_vendors_to_zoho(user)
-        # push_accounts_to_zoho(user)
-        # push_items_to_zoho(user)
-        # push_invoices_to_zoho(user)
+        push_taxes_to_zoho(user)
+        push_customers_to_zoho(user)
+        push_vendors_to_zoho(user)
+        push_accounts_to_zoho(user)
+        push_items_to_zoho(user)
+        push_invoices_to_zoho(user)
         push_receipts_to_zoho(user)
         return Response({"message": "Data pushed to Zoho Books successfully."})
     except Exception as e:
@@ -1225,3 +1145,26 @@ class SetNewPasswordAPIView(APIView):
             except DjangoUnicodeDecodeError:
                 return Response({"error": "Invalid decode"}, status=400)
         return Response(serializer.errors, status=400)
+
+
+#Quick Migrations Masters count
+class TotalRecordsView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        user = request.user
+
+        total_ledgers = Ledger.objects.filter(user=user).count()
+        total_vendors = Vendor.objects.filter(user=user).count()
+        total_accounts = Account.objects.filter(user=user).count()
+        total_items = Item.objects.filter(user=user).count()
+
+        total_records = total_ledgers + total_vendors + total_accounts + total_items
+
+        return Response({
+            "ledgers": total_ledgers,
+            "vendors": total_vendors,
+            "accounts": total_accounts,
+            "items": total_items,
+            "total": total_records
+        })

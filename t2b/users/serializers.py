@@ -44,7 +44,7 @@ class VendorSerializer(serializers.ModelSerializer):
 class AccountSerializer(serializers.ModelSerializer):
     class Meta:
         model = Account
-        fields = ['account_name', 'account_code', 'account_type']
+        fields = ['user','account_name', 'account_code', 'account_type']
 
 class ZohoBooksCredentialSerializer(serializers.ModelSerializer):
     class Meta:

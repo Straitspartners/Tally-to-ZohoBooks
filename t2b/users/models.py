@@ -24,6 +24,9 @@ class ZohoTax(models.Model):
     tax_name = models.CharField(max_length=50)
     tax_percentage = models.DecimalField(max_digits=5, decimal_places=2)
     zoho_tax_id = models.CharField(max_length=100, null=True, blank=True)
+    fetched_from_tally = models.BooleanField(default=False)
+    pushed_to_zoho = models.BooleanField(default=False)
+
 
 class Ledger(models.Model):
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, null=True)
@@ -41,6 +44,10 @@ class Ledger(models.Model):
     pincode = models.CharField(max_length=10, null=True, blank=True)
 
     zoho_contact_id = models.CharField(max_length=100, null=True, blank=True)
+
+    fetched_from_tally = models.BooleanField(default=False)
+    pushed_to_zoho = models.BooleanField(default=False)
+
 
 
     def __str__(self):
@@ -67,6 +74,10 @@ class Vendor(models.Model):
 
     zoho_contact_id = models.CharField(max_length=100, null=True, blank=True)
 
+    fetched_from_tally = models.BooleanField(default=False)
+    pushed_to_zoho = models.BooleanField(default=False)
+
+
 
     def __str__(self):
         return f"{self.name} - {self.parent}"
@@ -76,6 +87,7 @@ class Vendor(models.Model):
 
 
 class Account(models.Model):
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, null=True)
     account_name = models.CharField(max_length=255)
     account_code = models.CharField(max_length=255, unique=True)
     account_type = models.CharField(max_length=255)
@@ -84,7 +96,9 @@ class Account(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
-    
+    fetched_from_tally = models.BooleanField(default=False)
+    pushed_to_zoho = models.BooleanField(default=False)
+
 
     def __str__(self):
         return self.account_name
@@ -102,6 +116,8 @@ class Item(models.Model):
     gst_rate = models.DecimalField(max_digits=5, decimal_places=2, default=0.0)
     hsn_code = models.CharField(max_length=20, blank=True, null=True)
 
+    fetched_from_tally = models.BooleanField(default=False)
+    pushed_to_zoho = models.BooleanField(default=False)
 
     def __str__(self):
         return self.name
@@ -140,6 +156,8 @@ class Invoice(models.Model):
     total_amount = models.DecimalField(max_digits=10, decimal_places=2)
     created_at = models.DateTimeField(auto_now_add=True)
     zoho_invoice_id = models.CharField(max_length=100, null=True, blank=True)
+    fetched_from_tally = models.BooleanField(default=False)
+    pushed_to_zoho = models.BooleanField(default=False)
 
     class Meta:
         unique_together = ['user', 'invoice_number']
@@ -152,6 +170,8 @@ class InvoiceItem(models.Model):
     item_name = models.CharField(max_length=255)
     quantity = models.CharField(max_length=50)
     amount = models.DecimalField(max_digits=10, decimal_places=2)
+    fetched_from_tally = models.BooleanField(default=False)
+    pushed_to_zoho = models.BooleanField(default=False)
     
 
     def __str__(self):
@@ -174,6 +194,9 @@ class Receipt(models.Model):
     zoho_receipt_id = models.CharField(max_length=100, null=True, blank=True)
 
     created_at = models.DateTimeField(auto_now_add=True)
+
+    fetched_from_tally = models.BooleanField(default=False)
+    pushed_to_zoho = models.BooleanField(default=False)
 
     class Meta:
         unique_together = ['user', 'receipt_number']

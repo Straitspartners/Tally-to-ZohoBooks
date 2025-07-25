@@ -12,7 +12,7 @@ urlpatterns = [
     path('users/vendors/', views.sync_vendors, name='sync_vendors'),
     path('users/items/', views.sync_items, name='sync_items'),
     path('users/accounts/', AccountSyncView.as_view(), name='account-sync'),
-    path('users/invoices/push-to-zoho/', views.push_invoices_to_zoho, name='push_invoice_to_zoho'),
+   
     path('users/receipts/',views.sync_receipts,name='receipts-sync'),
    
     path('users/invoices/', views.sync_invoices, name='sync_invoices'),
@@ -23,6 +23,8 @@ urlpatterns = [
     path('request-reset-email/', RequestPasswordResetEmail.as_view()),
     path('password-reset/<uidb64>/<token>/', PasswordTokenCheckAPI.as_view()),
     path('password-reset-complete/', SetNewPasswordAPIView.as_view()),
+
+     path('total-records/', TotalRecordsView.as_view(), name='total-records'),
 
 ]
 

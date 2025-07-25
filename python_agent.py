@@ -6,6 +6,7 @@ import json
 import os
 import logging
 import re
+from tkcalendar import DateEntry
 
 # ---------------- CONFIG ----------------
 
@@ -179,38 +180,38 @@ TALLY_REQUEST_XML_ITEMS = """
 </ENVELOPE>
 """
 
-TALLY_REQUEST_XML_SALES_VOUCHERS = """
-<ENVELOPE>
-  <HEADER>
-    <VERSION>1</VERSION>
-    <TALLYREQUEST>Export</TALLYREQUEST>
-    <TYPE>Collection</TYPE>
-    <ID>Sales Vouchers</ID>
-  </HEADER>
-  <BODY>
-    <DESC>
-      <STATICVARIABLES>
-        <SVEXPORTFORMAT>$$SysName:XML</SVEXPORTFORMAT>
-        <EXPLODEFLAG>Yes</EXPLODEFLAG>
-        <SVFROMDATE>20240101</SVFROMDATE>
-        <SVTODATE>20251231</SVTODATE>
-      </STATICVARIABLES>
-      <TDL>
-        <TDLMESSAGE>
-          <COLLECTION NAME="Sales Vouchers" ISMODIFY="No">
-            <TYPE>Voucher</TYPE>
-            <FILTER>IsSales</FILTER>
-            <FETCH>DATE, VOUCHERNUMBER, LEDGERENTRIES.LIST, ALLINVENTORYENTRIES.LIST</FETCH>
-          </COLLECTION>
-          <SYSTEM TYPE="Formulae" NAME="IsSales">
-            $VoucherTypeName = "Sales"
-          </SYSTEM>
-        </TDLMESSAGE>
-      </TDL>
-    </DESC>
-  </BODY>
-</ENVELOPE>
-"""
+# TALLY_REQUEST_XML_SALES_VOUCHERS = """
+# <ENVELOPE>
+#   <HEADER>
+#     <VERSION>1</VERSION>
+#     <TALLYREQUEST>Export</TALLYREQUEST>
+#     <TYPE>Collection</TYPE>
+#     <ID>Sales Vouchers</ID>
+#   </HEADER>
+#   <BODY>
+#     <DESC>
+#       <STATICVARIABLES>
+#         <SVEXPORTFORMAT>$$SysName:XML</SVEXPORTFORMAT>
+#         <EXPLODEFLAG>Yes</EXPLODEFLAG>
+#         <SVFROMDATE>20240101</SVFROMDATE>
+#         <SVTODATE>20251231</SVTODATE>
+#       </STATICVARIABLES>
+#       <TDL>
+#         <TDLMESSAGE>
+#           <COLLECTION NAME="Sales Vouchers" ISMODIFY="No">
+#             <TYPE>Voucher</TYPE>
+#             <FILTER>IsSales</FILTER>
+#             <FETCH>DATE, VOUCHERNUMBER, LEDGERENTRIES.LIST, ALLINVENTORYENTRIES.LIST</FETCH>
+#           </COLLECTION>
+#           <SYSTEM TYPE="Formulae" NAME="IsSales">
+#             $VoucherTypeName = "Sales"
+#           </SYSTEM>
+#         </TDLMESSAGE>
+#       </TDL>
+#     </DESC>
+#   </BODY>
+# </ENVELOPE>
+# """
 
 # TALLY_REQUEST_XML_RECEIPTS = """
 # <ENVELOPE>
@@ -233,7 +234,7 @@ TALLY_REQUEST_XML_SALES_VOUCHERS = """
 #           <COLLECTION NAME="Receipt Vouchers" ISMODIFY="No">
 #             <TYPE>Voucher</TYPE>
 #             <FILTER>IsReceipt</FILTER>
-#             <FETCH>DATE, VOUCHERNUMBER, LEDGERENTRIES.LIST ,LEDGERENTRIES.LIST.CURRENTBALANCE</FETCH>
+#             <FETCH>DATE, VOUCHERNUMBER, LEDGERENTRIES.LIST, LEDGERENTRIES.LIST.AMOUNT, LEDGERENTRIES.LIST.LEDGERNAME, LEDGERENTRIES.LIST.CURRENTBALANCE , LEDGERENTRIES.LIST.BILLALLOCATIONS.LIST.NAME</FETCH>
 #           </COLLECTION>
 #           <SYSTEM TYPE="Formulae" NAME="IsReceipt">
 #             $VoucherTypeName = "Receipt"
@@ -245,31 +246,100 @@ TALLY_REQUEST_XML_SALES_VOUCHERS = """
 # </ENVELOPE>
 # """
 
-TALLY_REQUEST_XML_RECEIPTS = """
+def get_sales_voucher_xml(from_date, to_date):
+    return f"""
+    <ENVELOPE>
+      <HEADER>
+        <VERSION>1</VERSION>
+        <TALLYREQUEST>Export</TALLYREQUEST>
+        <TYPE>Collection</TYPE>
+        <ID>Sales Vouchers</ID>
+      </HEADER>
+      <BODY>
+        <DESC>
+          <STATICVARIABLES>
+            <SVEXPORTFORMAT>$$SysName:XML</SVEXPORTFORMAT>
+            <EXPLODEFLAG>Yes</EXPLODEFLAG>
+            <SVFROMDATE>{from_date}</SVFROMDATE>
+            <SVTODATE>{to_date}</SVTODATE>
+          </STATICVARIABLES>
+          <TDL>
+            <TDLMESSAGE>
+              <COLLECTION NAME="Sales Vouchers" ISMODIFY="No">
+                <TYPE>Voucher</TYPE>
+                <FILTER>IsSales</FILTER>
+                <FETCH>DATE, VOUCHERNUMBER, LEDGERENTRIES.LIST, ALLINVENTORYENTRIES.LIST</FETCH>
+              </COLLECTION>
+              <SYSTEM TYPE="Formulae" NAME="IsSales">
+                $VoucherTypeName = "Sales"
+              </SYSTEM>
+            </TDLMESSAGE>
+          </TDL>
+        </DESC>
+      </BODY>
+    </ENVELOPE>
+    """
+
+def get_receipt_voucher_xml(from_date, to_date):
+    return f"""
+    <ENVELOPE>
+      <HEADER>
+        <VERSION>1</VERSION>
+        <TALLYREQUEST>Export</TALLYREQUEST>
+        <TYPE>Collection</TYPE>
+        <ID>Receipt Vouchers</ID>
+      </HEADER>
+      <BODY>
+        <DESC>
+          <STATICVARIABLES>
+            <SVEXPORTFORMAT>$$SysName:XML</SVEXPORTFORMAT>
+            <EXPLODEFLAG>Yes</EXPLODEFLAG>
+            <SVFROMDATE>{from_date}</SVFROMDATE>
+            <SVTODATE>{to_date}</SVTODATE>
+          </STATICVARIABLES>
+          <TDL>
+            <TDLMESSAGE>
+              <COLLECTION NAME="Receipt Vouchers" ISMODIFY="No">
+                <TYPE>Voucher</TYPE>
+                <FILTER>IsReceipt</FILTER>
+                <FETCH>DATE, VOUCHERNUMBER, LEDGERENTRIES.LIST, LEDGERENTRIES.LIST.AMOUNT, LEDGERENTRIES.LIST.LEDGERNAME, LEDGERENTRIES.LIST.CURRENTBALANCE , LEDGERENTRIES.LIST.BILLALLOCATIONS.LIST.NAME</FETCH>
+              </COLLECTION>
+              <SYSTEM TYPE="Formulae" NAME="IsReceipt">
+                $VoucherTypeName = "Receipt"
+              </SYSTEM>
+            </TDLMESSAGE>
+          </TDL>
+        </DESC>
+      </BODY>
+    </ENVELOPE>
+    """
+
+TALLY_REQUEST_XML_BANK_ACCOUNTS = """
 <ENVELOPE>
   <HEADER>
     <VERSION>1</VERSION>
     <TALLYREQUEST>Export</TALLYREQUEST>
     <TYPE>Collection</TYPE>
-    <ID>Receipt Vouchers</ID>
+    <ID>Bank Ledgers</ID>
   </HEADER>
   <BODY>
     <DESC>
       <STATICVARIABLES>
         <SVEXPORTFORMAT>$$SysName:XML</SVEXPORTFORMAT>
-        <EXPLODEFLAG>Yes</EXPLODEFLAG>
-        <SVFROMDATE>20240101</SVFROMDATE>
-        <SVTODATE>20251231</SVTODATE>
       </STATICVARIABLES>
       <TDL>
         <TDLMESSAGE>
-          <COLLECTION NAME="Receipt Vouchers" ISMODIFY="No">
-            <TYPE>Voucher</TYPE>
-            <FILTER>IsReceipt</FILTER>
-            <FETCH>DATE, VOUCHERNUMBER, LEDGERENTRIES.LIST, LEDGERENTRIES.LIST.AMOUNT, LEDGERENTRIES.LIST.LEDGERNAME, LEDGERENTRIES.LIST.CURRENTBALANCE , LEDGERENTRIES.LIST.BILLALLOCATIONS.LIST.NAME</FETCH>
+          <COLLECTION NAME="Bank Ledgers" ISMODIFY="No">
+            <TYPE>Ledger</TYPE>
+            <FILTER>IsBankAccount</FILTER>
+            <FETCH>
+              NAME, PARENT, EMAIL, ADDRESS, LEDGERMOBILE, WEBSITE, LEDSTATENAME, COUNTRYNAME, PINCODE,
+              BANKALLOCATIONS.BANKNAME, BANKALLOCATIONS.BRANCHNAME, BANKALLOCATIONS.IFSCODE,
+              BANKALLOCATIONS.ACCOUNTNUMBER, BANKALLOCATIONS.BSRCODE
+            </FETCH>
           </COLLECTION>
-          <SYSTEM TYPE="Formulae" NAME="IsReceipt">
-            $VoucherTypeName = "Receipt"
+          <SYSTEM TYPE="Formulae" NAME="IsBankAccount">
+            $Parent = "Bank Accounts"
           </SYSTEM>
         </TDLMESSAGE>
       </TDL>
@@ -278,6 +348,69 @@ TALLY_REQUEST_XML_RECEIPTS = """
 </ENVELOPE>
 """
 
+
+def parse_bank_ledgers(xml_data):
+    import xml.etree.ElementTree as ET
+    ledgers = []
+
+    try:
+        xml_data = clean_xml(xml_data)
+        root = ET.fromstring(xml_data)
+
+        for ledger in root.findall(".//LEDGER"):
+            name = ledger.findtext(".//NAME", default="Unknown")
+            parent = ledger.findtext("PARENT", default="")
+            email = ledger.findtext("EMAIL", default="")
+            website = ledger.findtext("WEBSITE", default="")
+            ledger_mobile = ledger.findtext("LEDGERMOBILE", default="")
+            state_name = ledger.findtext("LEDSTATENAME", default="")
+            country_name = ledger.findtext("COUNTRYNAME", default="")
+            pincode = ledger.findtext("PINCODE", default="")
+
+            address_elems = ledger.findall(".//ADDRESS")
+            address_lines = [elem.text.strip() for elem in address_elems if elem.text]
+            address = ", ".join(address_lines)
+
+            bank_name = ledger.findtext(".//BANKALLOCATIONS.BANKNAME", default="")
+            branch_name = ledger.findtext(".//BANKALLOCATIONS.BRANCHNAME", default="")
+            ifsc_code = ledger.findtext(".//BANKALLOCATIONS.IFSCODE", default="")
+            account_number = ledger.findtext(".//BANKALLOCATIONS.ACCOUNTNUMBER", default="")
+            bsr_code = ledger.findtext(".//BANKALLOCATIONS.BSRCODE", default="")
+
+            ledgers.append({
+                "name": name,
+                "parent": parent,
+                "email": email,
+                "address": address,
+                "ledger_mobile": ledger_mobile,
+                "website": website,
+                "state_name": state_name,
+                "country_name": country_name,
+                "pincode": pincode,
+                "bank_name": bank_name,
+                "branch_name": branch_name,
+                "ifsc_code": ifsc_code,
+                "account_number": account_number,
+                "bsr_code": bsr_code
+            })
+
+        return ledgers
+
+    except ET.ParseError as e:
+        logging.error(f"XML Parse Error in Bank Ledgers: {e}")
+        with open("last_raw_bank_ledgers.xml", "w", encoding="utf-8") as file:
+            file.write(xml_data)
+        raise Exception("Failed to parse Tally Bank Ledger XML.")
+
+
+def send_banks_to_django(banks):
+    try:
+        headers = {"Authorization": f"Token {AUTH_TOKEN}"}
+        response = requests.post(DJANGO_API_URL_BANKS, json={"ledgers": banks}, headers=headers)
+        response.raise_for_status()
+    except requests.exceptions.RequestException as e:
+        logging.error(f"Error sending banks to Django: {e}")
+        raise Exception("Failed to send bank ledger data to Django server.")
 
 
 
@@ -518,41 +651,7 @@ def parse_items(xml_data):
         logging.error(f"XML Parse Error (Items): {e}")
         raise Exception("Failed to parse item XML from Tally.")
 
-# def parse_sales_vouchers(xml_data):
-#     invoices = []
-#     try:
-#         xml_data = clean_xml(xml_data)
-      
-#         root = ET.fromstring(xml_data)
 
-#         for voucher in root.findall(".//VOUCHER"):
-#             invoice_number = voucher.findtext("VOUCHERNUMBER", default="Unknown")
-#             date = voucher.findtext("DATE", default="")
-#             formatted_date = f"{date[6:8]}-{date[4:6]}-{date[0:4]}" if len(date) == 8 else date
-
-#             # Get customer name from the first LedgerEntry
-#             ledger_entry = voucher.find(".//LEDGERENTRIES.LIST")
-#             customer_name = ledger_entry.findtext("LEDGERNAME", default="Unknown") if ledger_entry is not None else "Unknown"
-
-#             for inventory in voucher.findall(".//ALLINVENTORYENTRIES.LIST"):
-#                 item_name = inventory.findtext("STOCKITEMNAME", default="Unknown")
-#                 amount = inventory.findtext("AMOUNT", default="0")
-#                 quantity = inventory.findtext("ACTUALQTY", default="0")
-
-#                 invoices.append({
-#                     "customer_name": customer_name,
-#                     "invoice_number": invoice_number,
-#                     "invoice_date": formatted_date,
-#                     "item_name": item_name,
-#                     "quantity": quantity,
-#                     "amount": amount
-#                 })
-
-#         return invoices
-
-#     except ET.ParseError as e:
-#         logging.error(f"XML Parse Error (Sales Vouchers): {e}")
-#         raise Exception("Failed to parse Sales Voucher XML from Tally.")
 
 from collections import defaultdict
 
@@ -627,9 +726,7 @@ def parse_receipts(xml_data):
 
     # Clean and parse XML
     xml_data = clean_xml(xml_data)
-    print(xml_data)
     root = ET.fromstring(xml_data)
-
     for voucher in root.findall(".//VOUCHER"):
         receipt_number = voucher.findtext("VOUCHERNUMBER", default="Unknown").strip()
         date_str = voucher.findtext("DATE", default="").strip()
@@ -740,9 +837,10 @@ def send_items_to_django(items):
         logging.error(f"Error sending items to Django: {e}")
         raise Exception("Failed to send items to server.")
     
+import logging
+
 def send_invoices_to_django(invoices):
     try:
-        # Strong filtering logic
         valid_invoices = []
         for inv in invoices:
             if (
@@ -764,7 +862,13 @@ def send_invoices_to_django(invoices):
             json={"invoices": valid_invoices},
             headers=headers
         )
-        response.raise_for_status()
+
+        if response.status_code != 201:
+            print("🚫 Server responded with error:")
+            print(response.status_code)
+            print(response.json())  # <-- Show detailed validation error
+            raise Exception("Failed to send invoices to server.")
+
     except requests.exceptions.RequestException as e:
         logging.error(f"Error sending invoices to Django: {e}")
         raise Exception("Failed to send invoices to server.")
@@ -808,6 +912,10 @@ def sync_data():
         xml_customers = get_tally_data(TALLY_REQUEST_XML_CUSTOMERS)
         customers = parse_ledgers(xml_customers, ledger_type="customer")
 
+        # Fetch and process bank accounts
+        xml_banks = get_tally_data(TALLY_REQUEST_XML_BANK_ACCOUNTS)
+        banks = parse_bank_ledgers(xml_banks)
+
         # Fetch vendors
         xml_vendors = get_tally_data(TALLY_REQUEST_XML_VENDORS)
         vendors = parse_ledgers(xml_vendors, ledger_type="vendor")
@@ -824,9 +932,11 @@ def sync_data():
         
         #   print(json.dumps(item, indent=2))
 
+        from_date = from_date_picker.get_date().strftime("%Y%m%d")
+        to_date = to_date_picker.get_date().strftime("%Y%m%d")
 
         # Invoices
-        xml_sales = get_tally_data(TALLY_REQUEST_XML_SALES_VOUCHERS)
+        xml_sales = get_tally_data(get_sales_voucher_xml(from_date, to_date))
         invoices = parse_sales_vouchers(xml_sales)
         from datetime import datetime
         for invoice in invoices:
@@ -837,20 +947,26 @@ def sync_data():
               # print(f"⚠️ Date formatting failed for invoice: {invoice.get('invoice_number')}, error: {e}")
               invoice["invoice_date"] = None
         
-        # print("\nFetched Invoices:")
-        # for invoice in invoices:
-        #   print(json.dumps(invoice, indent=2))
+        print("\nFetched Invoices:")
+        for invoice in invoices:
+          print(json.dumps(invoice, indent=2))
 
         # if not customers and not vendors:
         #     messagebox.showwarning("No Data", "No customers or vendors found in Tally.")
         #     status_label.config(text="No ledgers found.", fg="orange")
         #     return
 
-        xml_receipts=get_tally_data(TALLY_REQUEST_XML_RECEIPTS)
+        xml_receipts=get_tally_data(get_receipt_voucher_xml(from_date, to_date))
         receipts=parse_receipts(xml_receipts)
         print("\nFetched Receipts:")
         for receipt in receipts:
           print(json.dumps(receipt, indent=2))
+
+        if banks:
+          print("\nFetched Bank Ledgers:")
+          for bank in banks:
+            print(json.dumps(bank, indent=2))
+          send_banks_to_django(banks)
 
         if customers:
             send_customers_to_django(customers)
@@ -860,8 +976,8 @@ def sync_data():
             send_coa_to_django(accounts)
         if items:
             send_items_to_django(items)
-        # if invoices:
-        #   send_invoices_to_django(invoices)
+        if invoices:
+          send_invoices_to_django(invoices)
         if receipts:
           send_receipts_to_django(receipts)
 
@@ -879,7 +995,7 @@ def sync_data():
 
 root = tk.Tk()
 root.title("Tally to Django Sync Agent")
-root.geometry("400x260")
+root.geometry("400x360")
 root.resizable(False, False)
 
 title_label = tk.Label(root, text="Tally → Django Sync", font=("Arial", 16, "bold"))
@@ -888,11 +1004,23 @@ title_label.pack(pady=10)
 username_var = tk.StringVar()
 password_var = tk.StringVar()
 
+from_date_picker = DateEntry(root, width=12, background='darkblue',
+                             foreground='white', borderwidth=2, date_pattern='yyyy-mm-dd')
+to_date_picker = DateEntry(root, width=12, background='darkblue',
+                           foreground='white', borderwidth=2, date_pattern='yyyy-mm-dd')
+
+
 tk.Label(root, text="Username").pack()
 tk.Entry(root, textvariable=username_var).pack()
 
 tk.Label(root, text="Password").pack()
 tk.Entry(root, textvariable=password_var, show="*").pack()
+
+tk.Label(root, text="From Date").pack()
+from_date_picker.pack()
+
+tk.Label(root, text="To Date").pack()
+to_date_picker.pack()
 
 def login_and_sync():
     username = username_var.get()
@@ -927,3 +1055,5 @@ root.mainloop()
 # pip install requests
 # pip install pyinstaller
 # pyinstaller --onefile --windowed python_agent.py
+# pip install tkcalendar
+
