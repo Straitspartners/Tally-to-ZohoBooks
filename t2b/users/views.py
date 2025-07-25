@@ -1175,20 +1175,3 @@ class TotalRecordsView(APIView):
             "total_trans": total_records_trans
         })
 
-#Quick Migrations Transcations count
-class TotalRecordsTranscationView(APIView):
-    permission_classes = [IsAuthenticated]
-
-    def get(self, request):
-        user = request.user
-
-        total_sales_voucher = Invoice.objects.filter(user=user).count()
-        total_receipts = Receipt.objects.filter(user=user).count()
-
-        total_records = total_sales_voucher + total_receipts 
-
-        return Response({
-            "salesvoucher": total_sales_voucher,
-            "receipts": total_receipts,
-            "total": total_records
-        })
