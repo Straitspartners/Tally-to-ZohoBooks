@@ -27,6 +27,7 @@ def push_bank_accounts_to_zoho(user):
     for bank in banks:
         data = {
             "account_name": bank.name,
+            "account_type":"bank",
             "account_number": bank.account_number,
             "ifsc_code": bank.ifsc_code,
             "bank_name": bank.bank_name,
