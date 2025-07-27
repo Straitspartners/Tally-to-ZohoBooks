@@ -346,10 +346,10 @@ def sync_receipts(request):
                 receipt.amount = amount
                 receipt.payment_mode = payment_mode
                 receipt.customer = customer
-                receipt.customer_zoho_id = customer.zoho_contact_id
+                # receipt.customer_zoho_id = customer.zoho_contact_id
                 receipt.agst_invoice = invoice
-                receipt.invoice_zoho_id = invoice_zoho_id
-                receipt.invoice_total_amount = invoice_total_amount
+                # receipt.invoice_zoho_id = invoice_zoho_id
+                # receipt.invoice_total_amount = invoice_total_amount
                 receipt.fetched_from_tally = True
                 receipt.save()
                 synced_count += 1
@@ -362,10 +362,10 @@ def sync_receipts(request):
                 amount=amount,
                 payment_mode=payment_mode,
                 customer=customer,
-                customer_zoho_id=customer.zoho_contact_id,
+                # customer_zoho_id=customer.zoho_contact_id,
                 agst_invoice=invoice,
-                invoice_zoho_id=invoice_zoho_id,
-                invoice_total_amount=invoice_total_amount,
+                # invoice_zoho_id=invoice_zoho_id,
+                # invoice_total_amount=invoice_total_amount,
                 fetched_from_tally=True
             )
             synced_count += 1
@@ -373,7 +373,128 @@ def sync_receipts(request):
 
     return Response({"message": f"{synced_count} receipts synced successfully."}, status=status.HTTP_201_CREATED)
 
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def sync_purchases(request):
+    purchases_data = request.data.get("purchases", [])
+    if not purchases_data:
+        return Response({"error": "No purchase data provided."}, status=status.HTTP_400_BAD_REQUEST)
 
+    saved_purchases = []
+
+    for pur in purchases_data:
+        serializer = PurchaseSerializer(data=pur)
+        if serializer.is_valid():
+            purchase_qs = Purchase.objects.filter(
+                user=request.user,
+                purchase_number=serializer.validated_data['purchase_number']
+            )
+            if purchase_qs.exists():
+                purchase = purchase_qs.first()
+                if not purchase.fetched_from_tally:
+                    purchase.vendor_name = serializer.validated_data['vendor_name']
+                    purchase.purchase_date = serializer.validated_data['purchase_date']
+                    purchase.purchase_ledger = serializer.validated_data['purchase_ledger']
+                    purchase.cgst = serializer.validated_data['cgst']
+                    purchase.sgst = serializer.validated_data['sgst']
+                    purchase.total_amount = serializer.validated_data['total_amount']
+                    purchase.fetched_from_tally = True
+                    purchase.save()
+            else:
+                purchase = Purchase.objects.create(
+                    user=request.user,
+                    vendor_name=serializer.validated_data['vendor_name'],
+                    purchase_number=serializer.validated_data['purchase_number'],
+                    purchase_date=serializer.validated_data['purchase_date'],
+                    purchase_ledger=serializer.validated_data['purchase_ledger'],
+                    cgst=serializer.validated_data['cgst'],
+                    sgst=serializer.validated_data['sgst'],
+                    total_amount=serializer.validated_data['total_amount'],
+                    fetched_from_tally=True
+                )
+            # Save items
+            for item in serializer.validated_data['items']:
+                PurchaseItem.objects.get_or_create(
+                    purchase=purchase,
+                    item_name=item['item_name'],
+                    quantity=item['quantity'],
+                    amount=item['amount'],
+                    defaults={'fetched_from_tally': True}
+                )
+            saved_purchases.append(purchase.purchase_number)
+        else:
+            return Response({
+                "error": "Invalid purchase",
+                "details": serializer.errors,
+                "purchase": pur
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+    return Response({"message": f"{len(saved_purchases)} purchases synced successfully."}, status=status.HTTP_201_CREATED)
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def sync_payments(request):
+    payments_data = request.data.get("payments", [])
+    if not payments_data:
+        return Response({"error": "No payment data provided."}, status=status.HTTP_400_BAD_REQUEST)
+
+    synced_count = 0
+    processed_payments = []
+
+    for entry in payments_data:
+        payment_number = entry.get("payment_number")
+        vendor_name = (entry.get("vendor_name") or "").strip()
+        payment_date = entry.get("payment_date")
+        amount = entry.get("amount")
+        payment_mode = entry.get("payment_mode", "").strip()
+        agst_ref_name = entry.get("agst_ref_name", "").strip()
+
+        if not all([payment_number, vendor_name, payment_date, amount]):
+            continue  # skip invalid entries
+
+        vendor = Vendor.objects.filter(user=request.user, name__iexact=vendor_name).first()
+        if not vendor:
+            print(f"❌ Vendor not found: '{vendor_name}' for user {request.user}")
+            continue  # skip if vendor not found
+
+        invoice = None
+        invoice_zoho_id = None
+        invoice_total_amount = None
+
+        if agst_ref_name:
+            invoice = Invoice.objects.filter(user=request.user, invoice_number=agst_ref_name).first()
+            if invoice:
+                invoice_zoho_id = invoice.zoho_invoice_id
+                invoice_total_amount = invoice.total_amount
+
+        payment_qs = Payment.objects.filter(user=request.user, payment_number=payment_number)
+        if payment_qs.exists():
+            payment = payment_qs.first()
+            if not payment.fetched_from_tally:
+                payment.payment_date = payment_date
+                payment.amount = amount
+                payment.payment_mode = payment_mode
+                payment.vendor = vendor
+                payment.agst_invoice = invoice
+                payment.fetched_from_tally = True
+                payment.save()
+                synced_count += 1
+        else:
+            Payment.objects.create(
+                user=request.user,
+                payment_number=payment_number,
+                payment_date=payment_date,
+                amount=amount,
+                payment_mode=payment_mode,
+                vendor=vendor,
+                agst_invoice=invoice,
+                fetched_from_tally=True
+            )
+            synced_count += 1
+
+        processed_payments.append(payment_number)
+
+    return Response({"message": f"{synced_count} payments synced successfully."}, status=status.HTTP_201_CREATED)
 
 # Send the data to Zoho Books (Optional: Example function)
 def send_to_zoho(ledger_data, access_token):
@@ -984,6 +1105,61 @@ from decimal import Decimal
 import json
 
 
+# def push_receipts_to_zoho(user):
+#     access_token, org_id = get_valid_zoho_access_token(user)
+#     base_url = "https://www.zohoapis.com/books/v3"
+#     headers = {
+#         "Authorization": f"Zoho-oauthtoken {access_token}",
+#         "Content-Type": "application/json"
+#     }
+
+#     receipts = Receipt.objects.filter(user=user, zoho_receipt_id__isnull=True,pushed_to_zoho=False)
+
+#     for receipt in receipts:
+#         if not receipt.customer_zoho_id:
+#             print(f"[Skipped] Zoho ID missing for customer in receipt {receipt.receipt_number}")
+#             continue
+
+#         payload = {
+#             "customer_id": receipt.customer_zoho_id,
+#             "payment_mode": receipt.payment_mode.lower(),
+#             "amount": float(receipt.invoice_total_amount),
+#             "date": str(receipt.receipt_date)
+#         }
+
+#         if receipt.invoice_zoho_id:
+#             payload["invoices"] = [{
+#                 "invoice_id": receipt.invoice_zoho_id,
+#                 "amount_applied": float(receipt.amount)
+#             }]
+#         # 🔍 Print the payload
+#         print(f"\n📤 Payload for receipt {receipt.receipt_number}:")
+#         print(json.dumps(payload, indent=2))  # pretty print as JSON
+
+#         try:
+#             response = requests.post(
+#                 f"{base_url}/customerpayments?organization_id={org_id}",
+#                 headers=headers,
+#                 json=payload
+#             )
+#             response_data = response.json()
+#         except Exception as e:
+#             print(f"[Error] Request failed for receipt {receipt.receipt_number}: {e}")
+#             continue
+
+#         if response.status_code == 201:
+#             response_data = response.json()
+#             print("🔍 Zoho HTTP Status:", response.status_code)
+#             print("🔍 Zoho Response JSON:")
+#             print(json.dumps(response_data, indent=2))
+#             zoho_payment_id = response_data["payment"]["payment_id"]
+#             receipt.zoho_receipt_id = zoho_payment_id
+#             receipt.pushed_to_zoho = True
+#             receipt.save(update_fields=["zoho_receipt_id", "pushed_to_zoho"])
+#             print(f"[✅ Success] Receipt {receipt.receipt_number} pushed to Zoho. ID: {zoho_payment_id}")
+#         else:
+#             print(f"[❌ Failed] Receipt {receipt.receipt_number} → {response.status_code} → {response_data}")
+
 def push_receipts_to_zoho(user):
     access_token, org_id = get_valid_zoho_access_token(user)
     base_url = "https://www.zohoapis.com/books/v3"
@@ -992,28 +1168,41 @@ def push_receipts_to_zoho(user):
         "Content-Type": "application/json"
     }
 
-    receipts = Receipt.objects.filter(user=user, zoho_receipt_id__isnull=True,pushed_to_zoho=False)
+    receipts = Receipt.objects.filter(user=user, zoho_receipt_id__isnull=True, pushed_to_zoho=False)
 
     for receipt in receipts:
-        if not receipt.customer_zoho_id:
-            print(f"[Skipped] Zoho ID missing for customer in receipt {receipt.receipt_number}")
+        customer = receipt.customer
+        invoice = receipt.agst_invoice
+
+        if not customer or not customer.zoho_contact_id:
+            print(f"[Skipped] Missing Zoho ID for customer {customer} in receipt {receipt.receipt_number}")
             continue
 
+        customer_zoho_id = customer.zoho_contact_id
+        invoice_zoho_id = invoice.zoho_invoice_id if invoice else None
+        invoice_total_amount = invoice.total_amount if invoice else None
+
+        # 🔄 Update the receipt record with Zoho IDs before pushing
+        receipt.customer_zoho_id = customer_zoho_id
+        receipt.invoice_zoho_id = invoice_zoho_id
+        receipt.invoice_total_amount = invoice_total_amount
+        receipt.save(update_fields=["customer_zoho_id", "invoice_zoho_id", "invoice_total_amount"])
+
         payload = {
-            "customer_id": receipt.customer_zoho_id,
+            "customer_id": customer_zoho_id,
             "payment_mode": receipt.payment_mode.lower(),
-            "amount": float(receipt.invoice_total_amount),
+            "amount": float(invoice_total_amount or receipt.amount),
             "date": str(receipt.receipt_date)
         }
 
-        if receipt.invoice_zoho_id:
+        if invoice_zoho_id:
             payload["invoices"] = [{
-                "invoice_id": receipt.invoice_zoho_id,
+                "invoice_id": invoice_zoho_id,
                 "amount_applied": float(receipt.amount)
             }]
-        # 🔍 Print the payload
+
         print(f"\n📤 Payload for receipt {receipt.receipt_number}:")
-        print(json.dumps(payload, indent=2))  # pretty print as JSON
+        print(json.dumps(payload, indent=2))
 
         try:
             response = requests.post(
@@ -1027,10 +1216,6 @@ def push_receipts_to_zoho(user):
             continue
 
         if response.status_code == 201:
-            response_data = response.json()
-            print("🔍 Zoho HTTP Status:", response.status_code)
-            print("🔍 Zoho Response JSON:")
-            print(json.dumps(response_data, indent=2))
             zoho_payment_id = response_data["payment"]["payment_id"]
             receipt.zoho_receipt_id = zoho_payment_id
             receipt.pushed_to_zoho = True
@@ -1038,20 +1223,274 @@ def push_receipts_to_zoho(user):
             print(f"[✅ Success] Receipt {receipt.receipt_number} pushed to Zoho. ID: {zoho_payment_id}")
         else:
             print(f"[❌ Failed] Receipt {receipt.receipt_number} → {response.status_code} → {response_data}")
-            
+
+
+
+
+# def push_purchases_to_zoho(user):
+#     access_token, org_id = get_valid_zoho_access_token(user)
+
+#     headers = {
+#         "Authorization": f"Zoho-oauthtoken {access_token}",
+#         "Content-Type": "application/json"
+#     }
+
+#     base_url = f"https://www.zohoapis.com/books/v3"
+#     purchases = Purchase.objects.filter(user=user, zoho_bill_id__isnull=True, pushed_to_zoho=False)
+
+#     for purchase in purchases:
+#         # Step 1: Find vendor
+#         contact_url = f"{base_url}/contacts"
+#         params = {
+#             "organization_id": org_id,
+#             "contact_name": purchase.vendor_name
+#         }
+#         res = requests.get(contact_url, headers=headers, params=params)
+#         data = res.json()
+
+#         if res.status_code != 200 or not data.get("contacts"):
+#             print(f"[ERROR] Vendor '{purchase.vendor_name}' not found in Zoho.")
+#             continue
+
+#         contact_id = data['contacts'][0]['contact_id']
+
+#         # Step 2: Prepare line_items
+#         line_items = []
+#         for item in purchase.items.all():
+#             if not item.account or not item.account.zoho_account_id:
+#                 print(f"[WARNING] Item '{item.item_name}' has no linked Zoho account. Skipping.")
+#                 continue
+#             line_items.append({
+#                 "name": item.item_name,
+#                 "rate": float(item.amount),
+#                 "quantity": 1,
+#                 "account_id": item.account.zoho_account_id
+#             })
+
+#         payload = {
+#             "vendor_id": contact_id,
+#             "bill_number": purchase.purchase_number,
+#             "date": purchase.purchase_date.strftime('%Y-%m-%d'),
+#             "line_items": line_items,
+#         }
+
+#         # Step 3: Create bill
+#         bill_url = f"{base_url}/bills?organization_id={org_id}"
+#         response = requests.post(bill_url, headers=headers, json=payload)
+
+#         try:
+#             result = response.json()
+#         except:
+#             print(f"[ERROR] Invalid response for bill {purchase.purchase_number}")
+#             continue
+
+#         if response.status_code == 201:
+#             zoho_bill_id = result['bill']['bill_id']
+#             purchase.zoho_bill_id = zoho_bill_id
+#             purchase.pushed_to_zoho = True
+#             purchase.save(update_fields=["zoho_bill_id", "pushed_to_zoho"])
+#             print(f"[SUCCESS] Purchase {purchase.purchase_number} pushed to Zoho.")
+#         else:
+#             print(f"[FAILED] Purchase {purchase.purchase_number} → {response.status_code}: {result}")
+def push_purchases_to_zoho(user):
+    access_token, org_id = get_valid_zoho_access_token(user)
+
+    headers = {
+        "Authorization": f"Zoho-oauthtoken {access_token}",
+        "Content-Type": "application/json"
+    }
+
+    base_url = f"https://www.zohoapis.com/books/v3"
+    purchases = Purchase.objects.filter(user=user, zoho_bill_id__isnull=True, pushed_to_zoho=False)
+
+    for purchase in purchases:
+        # Step 1: Find vendor
+        contact_url = f"{base_url}/contacts"
+        params = {
+            "organization_id": org_id,
+            "contact_name": purchase.vendor_name
+        }
+        res = requests.get(contact_url, headers=headers, params=params)
+        data = res.json()
+
+        if res.status_code != 200 or not data.get("contacts"):
+            print(f"[ERROR] Vendor '{purchase.vendor_name}' not found in Zoho.")
+            continue
+
+        contact_id = data['contacts'][0]['contact_id']
+
+        # Step 2: Match purchase ledger to Account
+        try:
+            account = Account.objects.get(user=user, account_name__iexact=purchase.purchase_ledger)
+            zoho_account_id = account.zoho_account_id
+        except Account.DoesNotExist:
+            print(f"[ERROR] No matching Account for ledger '{purchase.purchase_ledger}'")
+            continue
+
+        # Step 3: Prepare line_items
+        line_items = []
+        for item in purchase.items.all():
+            line_items.append({
+                "name": item.item_name,
+                "rate": float(item.amount),
+                "quantity": 1,
+                "account_id": zoho_account_id
+            })
+
+        payload = {
+            "vendor_id": contact_id,
+            "bill_number": purchase.purchase_number,
+            "date": purchase.purchase_date.strftime('%Y-%m-%d'),
+            "line_items": line_items,
+        }
+
+        # Step 4: Create bill
+        bill_url = f"{base_url}/bills?organization_id={org_id}"
+        response = requests.post(bill_url, headers=headers, json=payload)
+
+        try:
+            result = response.json()
+        except:
+            print(f"[ERROR] Invalid response for bill {purchase.purchase_number}")
+            continue
+
+        if response.status_code == 201:
+            zoho_bill_id = result['bill']['bill_id']
+            purchase.zoho_bill_id = zoho_bill_id
+            purchase.pushed_to_zoho = True
+            purchase.save(update_fields=["zoho_bill_id", "pushed_to_zoho"])
+            print(f"[SUCCESS] Purchase {purchase.purchase_number} pushed to Zoho.")
+        else:
+            print(f"[FAILED] Purchase {purchase.purchase_number} → {response.status_code}: {result}")
+
+# def push_payments_to_zoho(user):
+#     access_token, org_id = get_valid_zoho_access_token(user)
+#     base_url = "https://www.zohoapis.com/books/v3"
+#     headers = {
+#         "Authorization": f"Zoho-oauthtoken {access_token}",
+#         "Content-Type": "application/json"
+#     }
+
+#     payments = Payment.objects.filter(user=user, zoho_payment_id__isnull=True, pushed_to_zoho=False)
+
+#     for payment in payments:
+#         vendor = payment.vendor
+#         invoice = payment.agst_invoice
+
+#         if not vendor or not vendor.zoho_contact_id:
+#             print(f"[Skipped] Missing Zoho ID for vendor {vendor} in payment {payment.payment_number}")
+#             continue
+
+#         payload = {
+#             "vendor_id": vendor.zoho_contact_id,
+#             "payment_mode": payment.payment_mode.lower(),
+#             "amount": float(payment.amount),
+#             "date": str(payment.payment_date)
+#         }
+
+#         if invoice:
+#             payload["invoices"] = [{
+#                 "invoice_id": invoice.zoho_invoice_id,
+#                 "amount_applied": float(payment.amount)
+#             }]
+
+#         try:
+#             response = requests.post(
+#                 f"{base_url}/vendorpayments?organization_id={org_id}",
+#                 headers=headers,
+#                 json=payload
+#             )
+#             data = response.json()
+#             if response.status_code == 201:
+#                 zoho_payment_id = data["payment"]["payment_id"]
+#                 payment.zoho_payment_id = zoho_payment_id
+#                 payment.pushed_to_zoho = True
+#                 payment.save(update_fields=["zoho_payment_id", "pushed_to_zoho"])
+#                 print(f"[✅ Success] Payment {payment.payment_number} pushed to Zoho.")
+#             else:
+#                 print(f"[❌ Failed] Payment {payment.payment_number}: {data}")
+#         except Exception as e:
+#             print(f"[Error] Failed to push payment {payment.payment_number}: {e}")
+def push_payments_to_zoho(user):
+    access_token, org_id = get_valid_zoho_access_token(user)
+    base_url = "https://www.zohoapis.com/books/v3"
+    headers = {
+        "Authorization": f"Zoho-oauthtoken {access_token}",
+        "Content-Type": "application/json"
+    }
+
+    payments = Payment.objects.filter(user=user, zoho_payment_id__isnull=True, pushed_to_zoho=False)
+
+    for payment in payments:
+        vendor = payment.vendor
+        purchase = payment.agst_invoice
+
+        if not vendor or not vendor.zoho_contact_id:
+            print(f"[Skipped] Missing Zoho contact ID for vendor in payment {payment.payment_number}")
+            continue
+
+        # 🔍 Find Zoho account ID using payment_mode from Account table
+        try:
+            account = Account.objects.get(user=user, account_name__iexact=payment.payment_mode.strip())
+            account_id = account.zoho_account_id
+            if not account_id:
+                print(f"[ERROR] Missing zoho_account_id for Account: '{account.account_name}'")
+                continue
+        except Account.DoesNotExist:
+            print(f"[ERROR] No matching Account found for payment_mode: '{payment.payment_mode}'")
+            continue
+
+        # 🧾 Construct payload
+        payload = {
+            "vendor_id": vendor.zoho_contact_id,
+            "payment_mode": payment.payment_mode,
+            "amount": float(payment.amount),
+            "date": str(payment.payment_date),
+            # "description": f"Payment for invoice {invoice.invoice_number if invoice else 'N/A'}",
+            "account_id": account_id
+        }
+
+        if purchase and purchase.zoho_bill_id:
+            payload["bills"] = [{
+                "bill_id": purchase.zoho_bill_id,
+                "amount_applied": float(payment.amount)
+            }]
+
+        # 🚀 Send to Zoho
+        try:
+            response = requests.post(
+                f"{base_url}/vendorpayments?organization_id={org_id}",
+                headers=headers,
+                json=payload
+            )
+            data = response.json()
+
+            if ("payment" in data or "vendorpayment" in data) and "payment_id" in data.get("vendorpayment", {}):
+                   zoho_payment_id = data["vendorpayment"]["payment_id"]
+                   payment.zoho_payment_id = zoho_payment_id
+                   payment.pushed_to_zoho = True
+                   payment.save(update_fields=["zoho_payment_id", "pushed_to_zoho"])
+                   print(f"[✅ Success] Payment {payment.payment_number} pushed to Zoho.")
+            else:
+                print(f"[❌ Failed] Payment {payment.payment_number}: {data}")
+        except Exception as e:
+            print(f"[Error] Failed to push payment {payment.payment_number}: {e}")
+
 
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def push_all_to_zoho(request):
     user = request.user
     try:
-        push_taxes_to_zoho(user)
-        push_customers_to_zoho(user)
-        push_vendors_to_zoho(user)
-        push_accounts_to_zoho(user)
-        push_items_to_zoho(user)
-        push_invoices_to_zoho(user)
-        push_receipts_to_zoho(user)
+        # push_taxes_to_zoho(user)
+        # push_customers_to_zoho(user)
+        # push_vendors_to_zoho(user)
+        # push_accounts_to_zoho(user)
+        # push_items_to_zoho(user)
+        # push_invoices_to_zoho(user)
+        # push_receipts_to_zoho(user)
+        push_purchases_to_zoho(user)
+        push_payments_to_zoho(user)
         return Response({"message": "Data pushed to Zoho Books successfully."})
     except Exception as e:
         return Response({"error": str(e)}, status=500)

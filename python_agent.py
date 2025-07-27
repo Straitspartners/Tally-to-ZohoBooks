@@ -313,105 +313,437 @@ def get_receipt_voucher_xml(from_date, to_date):
       </BODY>
     </ENVELOPE>
     """
+def get_payment_voucher_xml(from_date, to_date):
+    return f"""
+    <ENVELOPE>
+      <HEADER>
+        <VERSION>1</VERSION>
+        <TALLYREQUEST>Export</TALLYREQUEST>
+        <TYPE>Collection</TYPE>
+        <ID>Payment Vouchers</ID>
+      </HEADER>
+      <BODY>
+        <DESC>
+          <STATICVARIABLES>
+            <SVEXPORTFORMAT>$$SysName:XML</SVEXPORTFORMAT>
+            <EXPLODEFLAG>Yes</EXPLODEFLAG>
+            <SVFROMDATE>{from_date}</SVFROMDATE>
+            <SVTODATE>{to_date}</SVTODATE>
+          </STATICVARIABLES>
+          <TDL>
+            <TDLMESSAGE>
+              <COLLECTION NAME="Payment Vouchers" ISMODIFY="No">
+                <TYPE>Voucher</TYPE>
+                <FILTER>IsPayment</FILTER>
+                <FETCH>DATE, VOUCHERNUMBER, LEDGERENTRIES.LIST, LEDGERENTRIES.LIST.AMOUNT, LEDGERENTRIES.LIST.LEDGERNAME, LEDGERENTRIES.LIST.CURRENTBALANCE , LEDGERENTRIES.LIST.BILLALLOCATIONS.LIST.NAME</FETCH>
+              </COLLECTION>
+              <SYSTEM TYPE="Formulae" NAME="IsPayment">
+                $VoucherTypeName = "Payment"
+              </SYSTEM>
+            </TDLMESSAGE>
+          </TDL>
+        </DESC>
+      </BODY>
+    </ENVELOPE>
+    """
+def parse_payments(xml_data):
+    payments = []
+    xml_data = clean_xml(xml_data)
+    root = ET.fromstring(xml_data)
+    
+    for voucher in root.findall(".//VOUCHER"):
+        payment_number = voucher.findtext("VOUCHERNUMBER", default="Unknown").strip()
+        date_str = voucher.findtext("DATE", default="").strip()
+        try:
+            payment_date = f"{date_str[0:4]}-{date_str[4:6]}-{date_str[6:8]}"
+        except:
+            payment_date = date_str
 
-TALLY_REQUEST_XML_BANK_ACCOUNTS = """
-<ENVELOPE>
-  <HEADER>
-    <VERSION>1</VERSION>
-    <TALLYREQUEST>Export</TALLYREQUEST>
-    <TYPE>Collection</TYPE>
-    <ID>Bank Ledgers</ID>
-  </HEADER>
-  <BODY>
-    <DESC>
-      <STATICVARIABLES>
-        <SVEXPORTFORMAT>$$SysName:XML</SVEXPORTFORMAT>
-      </STATICVARIABLES>
-      <TDL>
-        <TDLMESSAGE>
-          <COLLECTION NAME="Bank Ledgers" ISMODIFY="No">
-            <TYPE>Ledger</TYPE>
-            <FILTER>IsBankAccount</FILTER>
-            <FETCH>
-              NAME, PARENT, EMAIL, ADDRESS, LEDGERMOBILE, WEBSITE, LEDSTATENAME, COUNTRYNAME, PINCODE,
-              BANKALLOCATIONS.BANKNAME, BANKALLOCATIONS.BRANCHNAME, BANKALLOCATIONS.IFSCODE,
-              BANKALLOCATIONS.ACCOUNTNUMBER, BANKALLOCATIONS.BSRCODE
-            </FETCH>
-          </COLLECTION>
-          <SYSTEM TYPE="Formulae" NAME="IsBankAccount">
-            $Parent = "Bank Accounts"
-          </SYSTEM>
-        </TDLMESSAGE>
-      </TDL>
-    </DESC>
-  </BODY>
-</ENVELOPE>
-"""
+        total_amount = 0.0
+        vendor_name = "Unknown"
+        payment_mode = "Unknown"
+        cur_balance = None
+        ref_name = None
 
+        for ledger in voucher.findall(".//ALLLEDGERENTRIES.LIST"):
+            ledger_name = ledger.findtext("LEDGERNAME", default="").strip()
+            amt_str = ledger.findtext("AMOUNT", default="0.0").strip()
 
-def parse_bank_ledgers(xml_data):
-    import xml.etree.ElementTree as ET
-    ledgers = []
+            try:
+                amt = float(amt_str)
+            except:
+                amt = 0.0
 
+            if "bank" in ledger_name.lower() or "cash" in ledger_name.lower():
+                payment_mode = ledger_name
+            else:
+                vendor_name = ledger_name
+                total_amount = abs(amt)  # Make positive
+
+                balance_tags = ["CURRENTBALANCE", "LEDGERCLOSINGBALANCE"]
+                for tag in balance_tags:
+                    balance_str = ledger.findtext(tag)
+                    if balance_str:
+                        try:
+                            cur_balance = float(balance_str)
+                            break
+                        except:
+                            continue
+
+                bill_alloc = ledger.find(".//BILLALLOCATIONS.LIST")
+                if bill_alloc is not None:
+                    ref_name = bill_alloc.findtext("NAME", default=None)
+
+        payments.append({
+            "payment_number": payment_number,
+            "vendor_name": vendor_name,
+            "payment_date": payment_date,
+            "amount": f"{total_amount:.2f}",
+            "payment_mode": payment_mode,
+            "cur_balance": f"{cur_balance:.2f}" if cur_balance is not None else None,
+            "agst_ref_name": ref_name
+        })
+
+    return payments
+
+def send_payments_to_django(payments):
     try:
-        xml_data = clean_xml(xml_data)
-        root = ET.fromstring(xml_data)
+        valid_payments = []
+        for payment in payments:
+            if (
+                payment.get("vendor_name") not in [None, "", "Unknown"]
+                and payment.get("payment_number") not in [None, "", "Unknown"]
+                and payment.get("payment_date")
+            ):
+                valid_payments.append(payment)
+            else:
+                print(f"⚠️ Skipping invalid payment: {payment}")
 
-        for ledger in root.findall(".//LEDGER"):
-            name = ledger.findtext(".//NAME", default="Unknown")
-            parent = ledger.findtext("PARENT", default="")
-            email = ledger.findtext("EMAIL", default="")
-            website = ledger.findtext("WEBSITE", default="")
-            ledger_mobile = ledger.findtext("LEDGERMOBILE", default="")
-            state_name = ledger.findtext("LEDSTATENAME", default="")
-            country_name = ledger.findtext("COUNTRYNAME", default="")
-            pincode = ledger.findtext("PINCODE", default="")
+        if not valid_payments:
+            raise Exception("No valid payments to send.")
 
-            address_elems = ledger.findall(".//ADDRESS")
-            address_lines = [elem.text.strip() for elem in address_elems if elem.text]
-            address = ", ".join(address_lines)
-
-            bank_name = ledger.findtext(".//BANKALLOCATIONS.BANKNAME", default="")
-            branch_name = ledger.findtext(".//BANKALLOCATIONS.BRANCHNAME", default="")
-            ifsc_code = ledger.findtext(".//BANKALLOCATIONS.IFSCODE", default="")
-            account_number = ledger.findtext(".//BANKALLOCATIONS.ACCOUNTNUMBER", default="")
-            bsr_code = ledger.findtext(".//BANKALLOCATIONS.BSRCODE", default="")
-
-            ledgers.append({
-                "name": name,
-                "parent": parent,
-                "email": email,
-                "address": address,
-                "ledger_mobile": ledger_mobile,
-                "website": website,
-                "state_name": state_name,
-                "country_name": country_name,
-                "pincode": pincode,
-                "bank_name": bank_name,
-                "branch_name": branch_name,
-                "ifsc_code": ifsc_code,
-                "account_number": account_number,
-                "bsr_code": bsr_code
-            })
-
-        return ledgers
-
-    except ET.ParseError as e:
-        logging.error(f"XML Parse Error in Bank Ledgers: {e}")
-        with open("last_raw_bank_ledgers.xml", "w", encoding="utf-8") as file:
-            file.write(xml_data)
-        raise Exception("Failed to parse Tally Bank Ledger XML.")
-
-
-def send_banks_to_django(banks):
-    try:
         headers = {"Authorization": f"Token {AUTH_TOKEN}"}
-        response = requests.post(DJANGO_API_URL_BANKS, json={"ledgers": banks}, headers=headers)
+        response = requests.post(
+            "http://127.0.0.1:8000/api/users/payments/",
+            json={"payments": valid_payments},
+            headers=headers
+        )
         response.raise_for_status()
     except requests.exceptions.RequestException as e:
-        logging.error(f"Error sending banks to Django: {e}")
-        raise Exception("Failed to send bank ledger data to Django server.")
+        logging.error(f"Error sending payments to Django: {e}")
+        raise
 
+# TALLY_REQUEST_XML_BANK_ACCOUNTS = """
+# <ENVELOPE>
+#   <HEADER>
+#     <VERSION>1</VERSION>
+#     <TALLYREQUEST>Export</TALLYREQUEST>
+#     <TYPE>Collection</TYPE>
+#     <ID>Bank Ledgers</ID>
+#   </HEADER>
+#   <BODY>
+#     <DESC>
+#       <STATICVARIABLES>
+#         <SVEXPORTFORMAT>$$SysName:XML</SVEXPORTFORMAT>
+#       </STATICVARIABLES>
+#       <TDL>
+#         <TDLMESSAGE>
+#           <COLLECTION NAME="Bank Ledgers" ISMODIFY="No">
+#             <TYPE>Ledger</TYPE>
+#             <FILTER>IsBankAccount</FILTER>
+#             <FETCH>
+#               NAME, PARENT, EMAIL, ADDRESS, LEDGERMOBILE, WEBSITE, LEDSTATENAME, COUNTRYNAME, PINCODE,
+#               BANKALLOCATIONS.BANKNAME, BANKALLOCATIONS.BRANCHNAME, BANKALLOCATIONS.IFSCODE,
+#               BANKALLOCATIONS.ACCOUNTNUMBER, BANKALLOCATIONS.BSRCODE
+#             </FETCH>
+#           </COLLECTION>
+#           <SYSTEM TYPE="Formulae" NAME="IsBankAccount">
+#             $Parent = "Bank Accounts"
+#           </SYSTEM>
+#         </TDLMESSAGE>
+#       </TDL>
+#     </DESC>
+#   </BODY>
+# </ENVELOPE>
+# """
+
+
+# def parse_bank_ledgers(xml_data):
+#     import xml.etree.ElementTree as ET
+#     ledgers = []
+
+#     try:
+#         xml_data = clean_xml(xml_data)
+#         root = ET.fromstring(xml_data)
+
+#         for ledger in root.findall(".//LEDGER"):
+#             name = ledger.findtext(".//NAME", default="Unknown")
+#             parent = ledger.findtext("PARENT", default="")
+#             email = ledger.findtext("EMAIL", default="")
+#             website = ledger.findtext("WEBSITE", default="")
+#             ledger_mobile = ledger.findtext("LEDGERMOBILE", default="")
+#             state_name = ledger.findtext("LEDSTATENAME", default="")
+#             country_name = ledger.findtext("COUNTRYNAME", default="")
+#             pincode = ledger.findtext("PINCODE", default="")
+
+#             address_elems = ledger.findall(".//ADDRESS")
+#             address_lines = [elem.text.strip() for elem in address_elems if elem.text]
+#             address = ", ".join(address_lines)
+
+#             bank_name = ledger.findtext(".//BANKALLOCATIONS.BANKNAME", default="")
+#             branch_name = ledger.findtext(".//BANKALLOCATIONS.BRANCHNAME", default="")
+#             ifsc_code = ledger.findtext(".//BANKALLOCATIONS.IFSCODE", default="")
+#             account_number = ledger.findtext(".//BANKALLOCATIONS.ACCOUNTNUMBER", default="")
+#             bsr_code = ledger.findtext(".//BANKALLOCATIONS.BSRCODE", default="")
+
+#             ledgers.append({
+#                 "name": name,
+#                 "parent": parent,
+#                 "email": email,
+#                 "address": address,
+#                 "ledger_mobile": ledger_mobile,
+#                 "website": website,
+#                 "state_name": state_name,
+#                 "country_name": country_name,
+#                 "pincode": pincode,
+#                 "bank_name": bank_name,
+#                 "branch_name": branch_name,
+#                 "ifsc_code": ifsc_code,
+#                 "account_number": account_number,
+#                 "bsr_code": bsr_code
+#             })
+
+#         return ledgers
+
+#     except ET.ParseError as e:
+#         logging.error(f"XML Parse Error in Bank Ledgers: {e}")
+#         with open("last_raw_bank_ledgers.xml", "w", encoding="utf-8") as file:
+#             file.write(xml_data)
+#         raise Exception("Failed to parse Tally Bank Ledger XML.")
+
+
+# def send_banks_to_django(banks):
+#     try:
+#         headers = {"Authorization": f"Token {AUTH_TOKEN}"}
+#         response = requests.post(DJANGO_API_URL_BANKS, json={"ledgers": banks}, headers=headers)
+#         response.raise_for_status()
+#     except requests.exceptions.RequestException as e:
+#         logging.error(f"Error sending banks to Django: {e}")
+#         raise Exception("Failed to send bank ledger data to Django server.")
+
+
+def get_purchase_voucher_xml(from_date, to_date):
+    return f"""
+    <ENVELOPE>
+      <HEADER>
+        <VERSION>1</VERSION>
+        <TALLYREQUEST>Export</TALLYREQUEST>
+        <TYPE>Collection</TYPE>
+        <ID>Purchase Vouchers</ID>
+      </HEADER>
+      <BODY>
+        <DESC>
+          <STATICVARIABLES>
+            <SVEXPORTFORMAT>$$SysName:XML</SVEXPORTFORMAT>
+            <EXPLODEFLAG>Yes</EXPLODEFLAG>
+            <SVFROMDATE>{from_date}</SVFROMDATE>
+            <SVTODATE>{to_date}</SVTODATE>
+          </STATICVARIABLES>
+          <TDL>
+            <TDLMESSAGE>
+              <COLLECTION NAME="Purchase Vouchers" ISMODIFY="No">
+                <TYPE>Voucher</TYPE>
+                <FILTER>IsPurchase</FILTER>
+                  <FETCH>DATE, VOUCHERNUMBER, ALLLEDGERENTRIES.LIST, ALLINVENTORYENTRIES.LIST ,LEDGERENTRIES.LIST.LedgerName, LEDGERENTRIES.LIST.PARENT</FETCH>
+              </COLLECTION>
+              <SYSTEM TYPE="Formulae" NAME="IsPurchase">
+                $VoucherTypeName = "Purchase"
+              </SYSTEM>
+            </TDLMESSAGE>
+          </TDL>
+        </DESC>
+      </BODY>
+    </ENVELOPE>
+    """
+# def parse_purchase_vouchers(xml_data):
+#     purchases = defaultdict(lambda: {
+#         "vendor_name": "",
+#         "purchase_number": "",
+#         "purchase_date": "",
+#         "purchase_ledger": "",
+#         "items": [],
+#         "cgst": 0.0,
+#         "sgst": 0.0,
+#         "total_amount": 0.0
+#     })
+
+#     xml_data = clean_xml(xml_data)
+#     print(xml_data)
+#     root = ET.fromstring(xml_data)
+
+#     for voucher in root.findall(".//VOUCHER"):
+#         purchase_no = voucher.findtext("VOUCHERNUMBER", default="Unknown")
+#         ledger_entry = voucher.find(".//LEDGERENTRIES.LIST")
+#         vendor = ledger_entry.findtext("LEDGERNAME", default="Unknown") if ledger_entry is not None else "Unknown"
+#         date_raw = voucher.findtext("DATE", default="")
+#         # date = f"{date_raw[6:8]}-{date_raw[4:6]}-{date_raw[0:4]}" if len(date_raw) == 8 else date_raw
+#         date = f"{date_raw[0:4]}-{date_raw[4:6]}-{date_raw[6:8]}"
+
+
+#         key = (purchase_no, vendor, date)
+
+#         purchase = purchases[key]
+#         purchase["vendor_name"] = vendor
+#         purchase["purchase_number"] = purchase_no
+#         purchase["purchase_date"] = date
+
+#         for item in voucher.findall(".//ALLINVENTORYENTRIES.LIST"):
+#             item_name = item.findtext("STOCKITEMNAME", default="")
+#             qty = item.findtext("ACTUALQTY", default="")
+#             amt = float(item.findtext("AMOUNT", default="0.0"))
+#             amt = abs(amt)
+            
+
+#             purchase["items"].append({
+#                 "item_name": item_name,
+#                 "quantity": qty.strip(),
+#                 "amount": f"{amt:.2f}"
+#             })
+#             purchase["total_amount"] += amt
+
+#         for ledger in voucher.findall(".//LEDGERENTRIES.LIST"):
+#             ledger_name = ledger.findtext("LEDGERNAME", "").lower()
+#             amt = float(ledger.findtext("AMOUNT", default="0.0"))
+#             if "cgst" in ledger_name:
+#                 purchase["cgst"] += abs(amt)
+#             elif "sgst" in ledger_name:
+#                 purchase["sgst"] += abs(amt)
+
+#     return [
+#         {
+#             **pur,
+#             "cgst": f"{pur['cgst']:.2f}",
+#             "sgst": f"{pur['sgst']:.2f}",
+#             "total_amount": f"{(pur['total_amount'] + pur['cgst'] + pur['sgst']):.2f}"
+#         }
+#         for pur in purchases.values()
+          
+#     ]
+
+from collections import defaultdict
+import xml.etree.ElementTree as ET
+
+def clean_xml(xml_data):
+    return xml_data.strip()
+
+def parse_purchase_vouchers(xml_data):
+    purchases = defaultdict(lambda: {
+        "vendor_name": "",
+        "purchase_number": "",
+        "purchase_date": "",
+        "purchase_ledger": "",
+        "items": [],
+        "cgst": 0.0,
+        "sgst": 0.0,
+        "total_amount": 0.0
+    })
+
+    xml_data = clean_xml(xml_data)
+    root = ET.fromstring(xml_data)
+
+    for voucher in root.findall(".//VOUCHER"):
+        purchase_no = voucher.findtext("VOUCHERNUMBER", default="Unknown").strip()
+        date_raw = voucher.findtext("DATE", default="").strip()
+        date = f"{date_raw[0:4]}-{date_raw[4:6]}-{date_raw[6:8]}" if len(date_raw) == 8 else date_raw
+
+        # Initialize variables to hold vendor and purchase ledger names
+        vendor = "Unknown"
+        purchase_ledger = ""
+
+        for ledger in voucher.findall(".//ALLLEDGERENTRIES.LIST"):
+            ledger_name = ledger.findtext("LEDGERNAME", default="").strip()
+            is_party_ledger = ledger.findtext("ISPARTYLEDGER", default="").strip().lower()
+
+            if is_party_ledger == "yes":
+                vendor = ledger_name
+            elif "purchase" in ledger_name.lower():
+                purchase_ledger = ledger_name
+
+        key = (purchase_no, vendor, date)
+        purchase = purchases[key]
+        purchase["vendor_name"] = vendor
+        purchase["purchase_number"] = purchase_no
+        purchase["purchase_date"] = date
+        purchase["purchase_ledger"] = purchase_ledger
+
+        for item in voucher.findall(".//ALLINVENTORYENTRIES.LIST"):
+            item_name = item.findtext("STOCKITEMNAME", default="")
+            qty = item.findtext("ACTUALQTY", default="")
+            amt = float(item.findtext("AMOUNT", default="0.0"))
+            amt = abs(amt)
+
+            purchase["items"].append({
+                "item_name": item_name,
+                "quantity": qty.strip(),
+                "amount": f"{amt:.2f}"
+            })
+            purchase["total_amount"] += amt
+
+        for ledger in voucher.findall(".//LEDGERENTRIES.LIST"):
+            ledger_name = ledger.findtext("LEDGERNAME", "").lower()
+            amt = float(ledger.findtext("AMOUNT", default="0.0"))
+            if "cgst" in ledger_name:
+                purchase["cgst"] += abs(amt)
+            elif "sgst" in ledger_name:
+                purchase["sgst"] += abs(amt)
+
+    return [
+        {
+            **pur,
+            "cgst": f"{pur['cgst']:.2f}",
+            "sgst": f"{pur['sgst']:.2f}",
+            "total_amount": f"{(pur['total_amount'] + pur['cgst'] + pur['sgst']):.2f}"
+        }
+        for pur in purchases.values()
+    ]
+
+
+def send_purchases_to_django(purchases):
+    print("▶️ send_purchases_to_django called with type:", type(purchases))
+
+    try:
+        valid_purchases = []
+        for pur in purchases:
+            if (
+                pur.get("vendor_name") not in [None, "", "Unknown"]
+                and pur.get("purchase_number") not in [None, "", "Unknown"]
+                and pur.get("purchase_date")
+                and pur.get("items") and isinstance(pur.get("items"), list) and len(pur.get("items")) > 0
+            ):
+                valid_purchases.append(pur)
+
+            else:
+                print(f"⚠️ Skipping invalid purchase: {pur}")
+
+        if not valid_purchases:
+            raise Exception("No valid purchases to send.")
+
+        headers = {"Authorization": f"Token {AUTH_TOKEN}"}
+        response = requests.post(
+            "http://127.0.0.1:8000/api/users/purchases/",  # Update if your Django URL is different
+            json={"purchases": valid_purchases},
+            headers=headers
+        )
+
+        if response.status_code != 201:
+            print("🚫 Server responded with error:")
+            print(response.status_code)
+            print(response.json())
+            raise Exception("Failed to send purchases to server.")
+
+    except requests.exceptions.RequestException as e:
+        logging.error(f"Error sending purchases to Django: {e}")
+        raise Exception("Failed to send purchases to server.")
 
 
 
@@ -672,7 +1004,7 @@ def parse_sales_vouchers(xml_data):
     for voucher in root.findall(".//VOUCHER"):
         inv_no = voucher.findtext("VOUCHERNUMBER", default="Unknown")
         ledger_entry = voucher.find(".//LEDGERENTRIES.LIST")
-        customer = ledger_entry.findtext("LEDGERNAME", default="Unknown") if ledger_entry is not None else "Unknown"
+        customer = ledger_entry.findtext(".//LEDGERNAME", default="Unknown") if ledger_entry is not None else "Unknown"
         date_raw = voucher.findtext("DATE", default="")
         date = f"{date_raw[6:8]}-{date_raw[4:6]}-{date_raw[0:4]}" if len(date_raw) == 8 else date_raw
 
@@ -913,8 +1245,8 @@ def sync_data():
         customers = parse_ledgers(xml_customers, ledger_type="customer")
 
         # Fetch and process bank accounts
-        xml_banks = get_tally_data(TALLY_REQUEST_XML_BANK_ACCOUNTS)
-        banks = parse_bank_ledgers(xml_banks)
+        # xml_banks = get_tally_data(TALLY_REQUEST_XML_BANK_ACCOUNTS)
+        # banks = parse_bank_ledgers(xml_banks)
 
         # Fetch vendors
         xml_vendors = get_tally_data(TALLY_REQUEST_XML_VENDORS)
@@ -962,11 +1294,30 @@ def sync_data():
         for receipt in receipts:
           print(json.dumps(receipt, indent=2))
 
-        if banks:
-          print("\nFetched Bank Ledgers:")
-          for bank in banks:
-            print(json.dumps(bank, indent=2))
-          send_banks_to_django(banks)
+        # if banks:
+        #   print("\nFetched Bank Ledgers:")
+        #   for bank in banks:
+        #     print(json.dumps(bank, indent=2))
+        #   send_banks_to_django(banks)
+
+        # Purchase Vouchers
+        xml_purchases = get_tally_data(get_purchase_voucher_xml(from_date, to_date))
+        purchases = parse_purchase_vouchers(xml_purchases)
+        print("Type of purchases:", type(purchases))
+        print("Type of first purchase:", type(purchases[0]) if purchases else "No purchases")
+
+        print("\nFetched Purchases:")
+        for purchase in purchases:
+          print(json.dumps(purchase, indent=2))
+
+        # Fetch Payments
+        xml_payments = get_tally_data(get_payment_voucher_xml(from_date, to_date))
+        payments = parse_payments(xml_payments)
+
+        print("\nFetched Payments:")
+        for payment in payments:
+          print(json.dumps(payment, indent=2))
+
 
         if customers:
             send_customers_to_django(customers)
@@ -980,6 +1331,10 @@ def sync_data():
           send_invoices_to_django(invoices)
         if receipts:
           send_receipts_to_django(receipts)
+        if purchases:
+          send_purchases_to_django(purchases)
+        if payments:
+          send_payments_to_django(payments)
 
         
         status_label.config(text="Syncing data to Django...", fg="blue")

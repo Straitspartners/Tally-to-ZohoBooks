@@ -205,4 +205,57 @@ class Receipt(models.Model):
         return f"Receipt {self.receipt_number} - {self.customer.name if self.customer else 'Unknown'}"
 
 
+class Purchase(models.Model):
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
+    vendor_name = models.CharField(max_length=255)
+    purchase_number = models.CharField(max_length=100)
+    purchase_ledger = models.CharField(max_length=255,default=None)  # <- Add this
+    purchase_date = models.DateField()
+    cgst = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    sgst = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    total_amount = models.DecimalField(max_digits=15, decimal_places=2)
+    fetched_from_tally = models.BooleanField(default=False)
+    pushed_to_zoho = models.BooleanField(default=False)
+    zoho_bill_id = models.CharField(max_length=255, null=True, blank=True)
+
+    def __str__(self):
+        return f"{self.purchase_number} - {self.vendor_name}"
+
+
+class PurchaseItem(models.Model):
+    purchase = models.ForeignKey(Purchase, on_delete=models.CASCADE, related_name="items")
+    account = models.ForeignKey(Account, on_delete=models.SET_NULL, null=True)
+    item_name = models.CharField(max_length=255)
+    quantity = models.CharField(max_length=50)
+    amount = models.DecimalField(max_digits=12, decimal_places=2)
+    fetched_from_tally = models.BooleanField(default=False)
+
+    def __str__(self):
+        return f"{self.item_name} ({self.quantity})"
+
+
+class Payment(models.Model):
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
+    payment_number = models.CharField(max_length=100)
+    payment_date = models.DateField()
+    amount = models.DecimalField(max_digits=10, decimal_places=2)
+    payment_mode = models.CharField(max_length=50)
+
+    vendor = models.ForeignKey(Vendor, on_delete=models.SET_NULL, null=True, blank=True)
+    vendor_zoho_id = models.CharField(max_length=100, null=True, blank=True)
+
+    agst_invoice = models.ForeignKey(Purchase, on_delete=models.SET_NULL, null=True, blank=True)
+    invoice_zoho_id = models.CharField(max_length=100, null=True, blank=True)
+    invoice_total_amount = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+
+    zoho_payment_id = models.CharField(max_length=100, null=True, blank=True)
+
+    fetched_from_tally = models.BooleanField(default=False)
+    pushed_to_zoho = models.BooleanField(default=False)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ['user', 'payment_number']
+
 

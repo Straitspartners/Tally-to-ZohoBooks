@@ -110,3 +110,17 @@ class InvoiceSerializer(serializers.ModelSerializer):
             'cgst', 'sgst', 'total_amount', 'items'
         ]
 
+class PurchaseItemSerializer(serializers.ModelSerializer):
+    class Meta :
+        model= PurchaseItem
+        fields = ['item_name', 'quantity', 'amount']
+
+class PurchaseSerializer(serializers.ModelSerializer):
+    items=PurchaseItemSerializer(many=True)
+
+    class Meta :
+        model=Purchase
+        fields = [
+            'vendor_name', 'purchase_number', 'purchase_date',
+            'cgst', 'sgst', 'total_amount', 'items','purchase_ledger'
+        ]
