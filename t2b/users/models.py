@@ -259,3 +259,31 @@ class Payment(models.Model):
         unique_together = ['user', 'payment_number']
 
 
+class BankAccount(models.Model):
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, null=True)
+    name = models.CharField(max_length=255)
+    parent = models.CharField(max_length=255, blank=True, null=True)
+    email = models.EmailField(blank=True, null=True)
+    address = models.TextField(blank=True, null=True)
+    ledger_mobile = models.CharField(max_length=20, blank=True, null=True)
+    website = models.CharField(blank=True, null=True)
+    state_name = models.CharField(max_length=100, blank=True, null=True)
+    country_name = models.CharField(max_length=100, blank=True, null=True)
+    pincode = models.CharField(max_length=20, blank=True, null=True)
+
+    # Bank Details
+    bank_name = models.CharField(max_length=255, blank=True, null=True)
+    branch_name = models.CharField(max_length=255, blank=True, null=True)
+    ifsc_code = models.CharField(max_length=20, blank=True, null=True)
+    account_number = models.CharField(max_length=50, blank=True, null=True)
+    bsr_code = models.CharField(max_length=20, blank=True, null=True)
+
+    fetched_from_tally = models.BooleanField(default=False)
+    pushed_to_zoho = models.BooleanField(default=False)
+    zoho_bank_id = models.CharField(max_length=255, blank=True, null=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return self.name

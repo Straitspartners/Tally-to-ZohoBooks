@@ -124,3 +124,10 @@ class PurchaseSerializer(serializers.ModelSerializer):
             'vendor_name', 'purchase_number', 'purchase_date',
             'cgst', 'sgst', 'total_amount', 'items','purchase_ledger'
         ]
+
+
+class BankAccountSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = BankAccount
+        fields = '__all__'
+

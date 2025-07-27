@@ -16,6 +16,7 @@ urlpatterns = [
     path('users/receipts/',views.sync_receipts,name='receipts-sync'),
     path('users/purchases/',views.sync_purchases,name='purchases-sync'),
     path('users/payments/',views.sync_payments,name='payments-sync'),
+    path('bank-accounts/', BankAccountSyncView.as_view(), name='sync-bank-accounts'),
    
     path('users/invoices/', views.sync_invoices, name='sync_invoices'),
     path('users/connect-zoho/', views.connect_zoho_books, name='connect_zoho_books'),

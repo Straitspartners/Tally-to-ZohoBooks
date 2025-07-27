@@ -11,6 +11,41 @@ from .models import *
 from .serializers import *
 import requests
 
+
+
+
+def push_bank_accounts_to_zoho(user):
+    from .models import BankAccount
+    access_token, org_id = get_valid_zoho_access_token(user)
+
+    banks = BankAccount.objects.filter(pushed_to_zoho=False)
+    url = f"https://www.zohoapis.com/books/v3/bankaccounts?organization_id={org_id}"
+    headers = {
+        "Authorization": f"Zoho-oauthtoken {access_token}"
+    }
+
+    for bank in banks:
+        data = {
+            "account_name": bank.name,
+            "account_number": bank.account_number,
+            "ifsc_code": bank.ifsc_code,
+            "bank_name": bank.bank_name,
+            "branch_name": bank.branch_name
+        }
+
+        r = requests.post(url, headers=headers, json=data)
+        response_data = r.json()
+        print(f"[Zoho Response] {response_data}")
+
+        if r.status_code in [200, 201]:
+            zoho_bank_id = response_data.get("bank_account", {}).get("account_id")
+            bank.zoho_bank_id = zoho_bank_id
+            bank.pushed_to_zoho = True
+            bank.save(update_fields=["zoho_bank_id", "pushed_to_zoho"])
+            print(f"[Bank] {bank.name} → Created in Zoho with ID {zoho_bank_id}")
+        else:
+            print(f"[Error] Failed to push bank: {bank.name} → {response_data}")
+
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def sync_ledgers(request):
@@ -165,7 +200,48 @@ class AccountSyncView(APIView):
             "errors": errors
         }, status=status.HTTP_201_CREATED if not errors else status.HTTP_207_MULTI_STATUS)
 
-    
+class BankAccountSyncView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        ledgers = request.data.get("banks", [])
+        print("Incoming banks:", ledgers)
+
+        created = []
+        errors = []
+
+        for ledger in ledgers:
+            serializer = BankAccountSerializer(data=ledger)
+            if serializer.is_valid():
+                name = serializer.validated_data.get("name")
+                account_number = serializer.validated_data.get("account_number")
+
+                filters = {
+                    "user": request.user,
+                    "name": name
+                }
+                if account_number:
+                    filters["account_number"] = account_number
+
+                try:
+                    bank_obj = BankAccount.objects.get(**filters)
+                    if not bank_obj.fetched_from_tally:
+                        for attr, value in serializer.validated_data.items():
+                            setattr(bank_obj, attr, value)
+                        bank_obj.fetched_from_tally = True
+                        bank_obj.save()
+                        created.append(bank_obj.name)
+                except BankAccount.DoesNotExist:
+                    new_obj = serializer.save(user=request.user, fetched_from_tally=True)
+                    created.append(new_obj.name)
+            else:
+                print("Serializer errors:", serializer.errors)
+                errors.append({"errors": serializer.errors, "data": ledger})
+
+        return Response({
+            "created": created,
+            "errors": errors
+        }, status=status.HTTP_201_CREATED if not errors else status.HTTP_207_MULTI_STATUS)
 
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
@@ -1489,8 +1565,9 @@ def push_all_to_zoho(request):
         # push_items_to_zoho(user)
         # push_invoices_to_zoho(user)
         # push_receipts_to_zoho(user)
-        push_purchases_to_zoho(user)
-        push_payments_to_zoho(user)
+        # push_purchases_to_zoho(user)
+        # push_payments_to_zoho(user)
+        push_bank_accounts_to_zoho(user)
         return Response({"message": "Data pushed to Zoho Books successfully."})
     except Exception as e:
         return Response({"error": str(e)}, status=500)

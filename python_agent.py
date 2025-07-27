@@ -433,40 +433,100 @@ def send_payments_to_django(payments):
         logging.error(f"Error sending payments to Django: {e}")
         raise
 
-# TALLY_REQUEST_XML_BANK_ACCOUNTS = """
-# <ENVELOPE>
-#   <HEADER>
-#     <VERSION>1</VERSION>
-#     <TALLYREQUEST>Export</TALLYREQUEST>
-#     <TYPE>Collection</TYPE>
-#     <ID>Bank Ledgers</ID>
-#   </HEADER>
-#   <BODY>
-#     <DESC>
-#       <STATICVARIABLES>
-#         <SVEXPORTFORMAT>$$SysName:XML</SVEXPORTFORMAT>
-#       </STATICVARIABLES>
-#       <TDL>
-#         <TDLMESSAGE>
-#           <COLLECTION NAME="Bank Ledgers" ISMODIFY="No">
-#             <TYPE>Ledger</TYPE>
-#             <FILTER>IsBankAccount</FILTER>
-#             <FETCH>
-#               NAME, PARENT, EMAIL, ADDRESS, LEDGERMOBILE, WEBSITE, LEDSTATENAME, COUNTRYNAME, PINCODE,
-#               BANKALLOCATIONS.BANKNAME, BANKALLOCATIONS.BRANCHNAME, BANKALLOCATIONS.IFSCODE,
-#               BANKALLOCATIONS.ACCOUNTNUMBER, BANKALLOCATIONS.BSRCODE
-#             </FETCH>
-#           </COLLECTION>
-#           <SYSTEM TYPE="Formulae" NAME="IsBankAccount">
-#             $Parent = "Bank Accounts"
-#           </SYSTEM>
-#         </TDLMESSAGE>
-#       </TDL>
-#     </DESC>
-#   </BODY>
-# </ENVELOPE>
-# """
+TALLY_REQUEST_XML_BANK_ACCOUNTS = """
+<ENVELOPE>
+  <HEADER>
+    <VERSION>1</VERSION>
+    <TALLYREQUEST>Export</TALLYREQUEST>
+    <TYPE>Collection</TYPE>
+    <ID>Bank Ledgers</ID>
+  </HEADER>
+  <BODY>
+    <DESC>
+      <STATICVARIABLES>
+        <SVEXPORTFORMAT>$$SysName:XML</SVEXPORTFORMAT>
+      </STATICVARIABLES>
+      <TDL>
+        <TDLMESSAGE>
+          <COLLECTION NAME="Bank Ledgers" ISMODIFY="No">
+            <TYPE>Ledger</TYPE>
+            <FILTER>IsBankAccount</FILTER>
+            <FETCH>
+              NAME, PARENT, EMAIL, ADDRESS, LEDGERMOBILE, WEBSITE, LEDSTATENAME, COUNTRYNAME, PINCODE,
+              BANKALLOCATIONS.BANKNAME, BANKALLOCATIONS.BRANCHNAME, BANKALLOCATIONS.IFSCODE,
+              BANKALLOCATIONS.ACCOUNTNUMBER, BANKALLOCATIONS.BSRCODE
+            </FETCH>
+          </COLLECTION>
+          <SYSTEM TYPE="Formulae" NAME="IsBankAccount">
+            $Parent = "Bank Accounts"
+          </SYSTEM>
+        </TDLMESSAGE>
+      </TDL>
+    </DESC>
+  </BODY>
+</ENVELOPE>
+"""
+def parse_bank_ledgers(xml_data):
+    import xml.etree.ElementTree as ET
+    import logging
 
+    banks = []
+
+    try:
+        xml_data = clean_xml(xml_data)  # Make sure this is defined elsewhere
+        print(xml_data)
+        root = ET.fromstring(xml_data)
+
+        for ledger in root.findall(".//LEDGER"):
+            name = ledger.findtext(".//NAME", default="Unknown")
+            parent = ledger.findtext("PARENT", default="")
+            email = ledger.findtext("EMAIL", default="")
+            website = ledger.findtext("WEBSITE", default="")
+            ledger_mobile = ledger.findtext("LEDGERMOBILE", default="")
+            state_name = ledger.findtext("LEDSTATENAME", default="")
+            country_name = ledger.findtext("COUNTRYNAME", default="")
+            pincode = ledger.findtext("PINCODE", default="")
+
+            # Address can have multiple lines
+            address_elems = ledger.findall(".//ADDRESS")
+            address_lines = [elem.text.strip() for elem in address_elems if elem.text]
+            address = ", ".join(address_lines)
+
+            # Handle BANKALLOCATIONS safely
+            bank_alloc = ledger.find(".//BANKALLOCATIONS.LIST")
+            if bank_alloc is not None:
+                bank_name = bank_alloc.findtext("BANKNAME", default="")
+                branch_name = bank_alloc.findtext("BRANCHNAME", default="")
+                ifsc_code = bank_alloc.findtext("IFSCODE", default="")
+                account_number = bank_alloc.findtext("ACCOUNTNUMBER", default="")
+                bsr_code = bank_alloc.findtext("BSRCODE", default="")
+            else:
+                bank_name = branch_name = ifsc_code = account_number = bsr_code = ""
+
+            banks.append({
+                "name": name,
+                "parent": parent,
+                "email": email,
+                "address": address,
+                "ledger_mobile": ledger_mobile,
+                "website": website,
+                "state_name": state_name,
+                "country_name": country_name,
+                "pincode": pincode,
+                "bank_name": bank_name,
+                "branch_name": branch_name,
+                "ifsc_code": ifsc_code,
+                "account_number": account_number,
+                "bsr_code": bsr_code
+            })
+
+        return banks
+
+    except ET.ParseError as e:
+        logging.error(f"XML Parse Error in Bank Ledgers: {e}")
+        with open("last_raw_bank_ledgers.xml", "w", encoding="utf-8") as file:
+            file.write(xml_data)
+        raise Exception("Failed to parse Tally Bank Ledger XML.")
 
 # def parse_bank_ledgers(xml_data):
 #     import xml.etree.ElementTree as ET
@@ -474,6 +534,7 @@ def send_payments_to_django(payments):
 
 #     try:
 #         xml_data = clean_xml(xml_data)
+#         print(xml_data)
 #         root = ET.fromstring(xml_data)
 
 #         for ledger in root.findall(".//LEDGER"):
@@ -521,15 +582,31 @@ def send_payments_to_django(payments):
 #             file.write(xml_data)
 #         raise Exception("Failed to parse Tally Bank Ledger XML.")
 
+def send_banks_to_django(banks):
+    try:
+        valid_banks = []
+        for bank in banks:
+            if (
+                bank.get("name") not in [None, "", "Unknown"] 
+            ):
+                valid_banks.append(bank)
+            else:
+                print(f"⚠️ Skipping invalid bank ledger: {bank}")
 
-# def send_banks_to_django(banks):
-#     try:
-#         headers = {"Authorization": f"Token {AUTH_TOKEN}"}
-#         response = requests.post(DJANGO_API_URL_BANKS, json={"ledgers": banks}, headers=headers)
-#         response.raise_for_status()
-#     except requests.exceptions.RequestException as e:
-#         logging.error(f"Error sending banks to Django: {e}")
-#         raise Exception("Failed to send bank ledger data to Django server.")
+        if not valid_banks:
+            raise Exception("No valid bank ledgers to send.")
+
+        headers = {"Authorization": f"Token {AUTH_TOKEN}"}
+        response = requests.post(
+            "http://127.0.0.1:8000/api/bank-accounts/",
+            json={"banks": valid_banks},
+            headers=headers
+        )
+        response.raise_for_status()
+
+    except requests.exceptions.RequestException as e:
+        logging.error(f"Error sending banks to Django: {e}")
+        raise Exception("Failed to send bank ledger data to Django server.")
 
 
 def get_purchase_voucher_xml(from_date, to_date):
@@ -1245,8 +1322,8 @@ def sync_data():
         customers = parse_ledgers(xml_customers, ledger_type="customer")
 
         # Fetch and process bank accounts
-        # xml_banks = get_tally_data(TALLY_REQUEST_XML_BANK_ACCOUNTS)
-        # banks = parse_bank_ledgers(xml_banks)
+        xml_banks = get_tally_data(TALLY_REQUEST_XML_BANK_ACCOUNTS)
+        banks = parse_bank_ledgers(xml_banks)
 
         # Fetch vendors
         xml_vendors = get_tally_data(TALLY_REQUEST_XML_VENDORS)
@@ -1279,9 +1356,9 @@ def sync_data():
               # print(f"⚠️ Date formatting failed for invoice: {invoice.get('invoice_number')}, error: {e}")
               invoice["invoice_date"] = None
         
-        print("\nFetched Invoices:")
-        for invoice in invoices:
-          print(json.dumps(invoice, indent=2))
+        # print("\nFetched Invoices:")
+        # for invoice in invoices:
+        #   print(json.dumps(invoice, indent=2))
 
         # if not customers and not vendors:
         #     messagebox.showwarning("No Data", "No customers or vendors found in Tally.")
@@ -1290,15 +1367,15 @@ def sync_data():
 
         xml_receipts=get_tally_data(get_receipt_voucher_xml(from_date, to_date))
         receipts=parse_receipts(xml_receipts)
-        print("\nFetched Receipts:")
-        for receipt in receipts:
-          print(json.dumps(receipt, indent=2))
+        # print("\nFetched Receipts:")
+        # for receipt in receipts:
+        #   print(json.dumps(receipt, indent=2))
 
-        # if banks:
-        #   print("\nFetched Bank Ledgers:")
-        #   for bank in banks:
-        #     print(json.dumps(bank, indent=2))
-        #   send_banks_to_django(banks)
+        if banks:
+          print("\nFetched Bank Ledgers:")
+          for bank in banks:
+            print(json.dumps(bank, indent=2))
+          send_banks_to_django(banks)
 
         # Purchase Vouchers
         xml_purchases = get_tally_data(get_purchase_voucher_xml(from_date, to_date))
@@ -1306,17 +1383,17 @@ def sync_data():
         print("Type of purchases:", type(purchases))
         print("Type of first purchase:", type(purchases[0]) if purchases else "No purchases")
 
-        print("\nFetched Purchases:")
-        for purchase in purchases:
-          print(json.dumps(purchase, indent=2))
+        # print("\nFetched Purchases:")
+        # for purchase in purchases:
+        #   print(json.dumps(purchase, indent=2))
 
         # Fetch Payments
         xml_payments = get_tally_data(get_payment_voucher_xml(from_date, to_date))
         payments = parse_payments(xml_payments)
 
-        print("\nFetched Payments:")
-        for payment in payments:
-          print(json.dumps(payment, indent=2))
+        # print("\nFetched Payments:")
+        # for payment in payments:
+        #   print(json.dumps(payment, indent=2))
 
 
         if customers:
@@ -1335,6 +1412,8 @@ def sync_data():
           send_purchases_to_django(purchases)
         if payments:
           send_payments_to_django(payments)
+        if banks:
+          send_banks_to_django(banks)
 
         
         status_label.config(text="Syncing data to Django...", fg="blue")
