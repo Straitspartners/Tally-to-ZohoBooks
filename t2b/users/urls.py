@@ -33,6 +33,11 @@ urlpatterns = [
     path('total-records/', TotalRecordsView.as_view(), name='total-records'),
     path('data-migration-status/', DataMigrationStatusView.as_view(), name='data-migration-status'),
     path('customerdashboard/',  CustomersDashboard.as_view(), name='ledger-summary'),
+     path('vendordashboard/',  VendorDashboard.as_view(), name='ledger-summary'),
+      path('coadashboard/',  COADashboard.as_view(), name='ledger-summary'),
+       path('itemsdashboard/', ItemsDashboard.as_view(), name='ledger-summary'),
+        path('receiptdashboard/', ReceiptDashboard.as_view(), name='ledger-summary'),
+     path('paymentdashboard/', PaymentDashboard.as_view(), name='ledger-summary'),
 
 ]
 

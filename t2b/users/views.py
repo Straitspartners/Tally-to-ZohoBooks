@@ -2075,3 +2075,151 @@ class CustomersDashboard(APIView):
         }
 
         return Response(data)
+
+class VendorDashboard(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        user = request.user
+
+        # Filter data by authenticated user
+        fetched_count = Vendor.objects.filter(user=user, fetched_from_tally=True).count()
+        pushed_count = Vendor.objects.filter(user=user, pushed_to_zoho=True).count()
+        pending_to_push_count = Vendor.objects.filter(
+            user=user,
+            fetched_from_tally=True,
+            pushed_to_zoho=False
+        ).count()
+
+        # Get all ledgers for this user
+        all_ledgers = list(Vendor.objects.filter(user=user).values())
+
+        data = {
+            "summary": {
+                "fetched_from_tally": fetched_count,
+                "pushed_to_zoho": pushed_count,
+                "pending_to_push_to_zoho": pending_to_push_count
+            },
+            "all_ledgers": all_ledgers
+        }
+
+        return Response(data)
+
+class COADashboard(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        user = request.user
+
+        # Filter data by authenticated user
+        fetched_count = Account.objects.filter(user=user, fetched_from_tally=True).count()
+        pushed_count = Account.objects.filter(user=user, pushed_to_zoho=True).count()
+        pending_to_push_count = Account.objects.filter(
+            user=user,
+            fetched_from_tally=True,
+            pushed_to_zoho=False
+        ).count()
+
+        # Get all ledgers for this user
+        all_ledgers = list(Account.objects.filter(user=user).values())
+
+        data = {
+            "summary": {
+                "fetched_from_tally": fetched_count,
+                "pushed_to_zoho": pushed_count,
+                "pending_to_push_to_zoho": pending_to_push_count
+            },
+            "all_ledgers": all_ledgers
+        }
+
+        return Response(data)
+
+class ItemsDashboard(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        user = request.user
+
+        # Filter data by authenticated user
+        fetched_count = Item.objects.filter(user=user, fetched_from_tally=True).count()
+        pushed_count = Item.objects.filter(user=user, pushed_to_zoho=True).count()
+        pending_to_push_count = Item.objects.filter(
+            user=user,
+            fetched_from_tally=True,
+            pushed_to_zoho=False
+        ).count()
+
+        # Get all ledgers for this user
+        all_ledgers = list(Item.objects.filter(user=user).values())
+
+        data = {
+            "summary": {
+                "fetched_from_tally": fetched_count,
+                "pushed_to_zoho": pushed_count,
+                "pending_to_push_to_zoho": pending_to_push_count
+            },
+            "all_ledgers": all_ledgers
+        }
+
+        return Response(data)
+
+
+
+class ReceiptDashboard(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        user = request.user
+
+        # Filter data by authenticated user
+        fetched_count = Receipt.objects.filter(user=user, fetched_from_tally=True).count()
+        pushed_count = Receipt.objects.filter(user=user, pushed_to_zoho=True).count()
+        pending_to_push_count = Receipt.objects.filter(
+            user=user,
+            fetched_from_tally=True,
+            pushed_to_zoho=False
+        ).count()
+
+        # Get all ledgers for this user
+        all_ledgers = list(Receipt.objects.filter(user=user).values())
+
+        data = {
+            "summary": {
+                "fetched_from_tally": fetched_count,
+                "pushed_to_zoho": pushed_count,
+                "pending_to_push_to_zoho": pending_to_push_count
+            },
+            "all_ledgers": all_ledgers
+        }
+
+        return Response(data)
+
+class PaymentDashboard(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        user = request.user
+
+        # Filter data by authenticated user
+        fetched_count = Payment.objects.filter(user=user, fetched_from_tally=True).count()
+        pushed_count = Payment.objects.filter(user=user, pushed_to_zoho=True).count()
+        pending_to_push_count = Payment.objects.filter(
+            user=user,
+            fetched_from_tally=True,
+            pushed_to_zoho=False
+        ).count()
+
+        # Get all ledgers for this user
+        all_ledgers = list(Payment.objects.filter(user=user).values())
+
+        data = {
+            "summary": {
+                "fetched_from_tally": fetched_count,
+                "pushed_to_zoho": pushed_count,
+                "pending_to_push_to_zoho": pending_to_push_count
+            },
+            "all_ledgers": all_ledgers
+        }
+
+        return Response(data)
+
