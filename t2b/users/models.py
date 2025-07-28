@@ -287,3 +287,56 @@ class BankAccount(models.Model):
 
     def __str__(self):
         return self.name
+
+
+class CreditNote(models.Model):
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
+    customer_name = models.CharField(max_length=255)
+    note_number = models.CharField(max_length=100)
+    note_date = models.DateField()
+    cgst = models.DecimalField(max_digits=10, decimal_places=2)
+    sgst = models.DecimalField(max_digits=10, decimal_places=2)
+    total_amount = models.DecimalField(max_digits=15, decimal_places=2)
+    fetched_from_tally = models.BooleanField(default=False)
+    zoho_credit_note_id = models.CharField(max_length=255, null=True, blank=True)
+    pushed_to_zoho = models.BooleanField(default=False)
+    invoice = models.ForeignKey('Invoice', null=True, blank=True, on_delete=models.SET_NULL)  # <-- Add this line
+
+    def __str__(self):
+        return f"Credit Note {self.note_number} - {self.customer_name}"
+
+class CreditNoteItem(models.Model):
+    credit_note = models.ForeignKey(CreditNote, related_name='items', on_delete=models.CASCADE)
+    item_name = models.CharField(max_length=255)
+    quantity = models.CharField(max_length=100)
+    amount = models.DecimalField(max_digits=15, decimal_places=2)
+    fetched_from_tally = models.BooleanField(default=False)
+
+    def __str__(self):
+        return f"{self.item_name} ({self.quantity})"
+
+
+class DebitNote(models.Model):
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
+    customer_name = models.CharField(max_length=255)
+    note_number = models.CharField(max_length=100)
+    note_date = models.DateField()
+    cgst = models.DecimalField(max_digits=10, decimal_places=2)
+    sgst = models.DecimalField(max_digits=10, decimal_places=2)
+    total_amount = models.DecimalField(max_digits=15, decimal_places=2)
+    fetched_from_tally = models.BooleanField(default=False)
+    zoho_debit_note_id = models.CharField(max_length=255, null=True, blank=True)
+    pushed_to_zoho = models.BooleanField(default=False)
+
+    def __str__(self):
+        return f"Debit Note {self.note_number} - {self.customer_name}"
+
+class DebitNoteItem(models.Model):
+    debit_note = models.ForeignKey(DebitNote, related_name='items', on_delete=models.CASCADE)
+    item_name = models.CharField(max_length=255)
+    quantity = models.CharField(max_length=100)
+    amount = models.DecimalField(max_digits=15, decimal_places=2)
+    fetched_from_tally = models.BooleanField(default=False)
+
+    def __str__(self):
+        return f"{self.item_name} ({self.quantity})"

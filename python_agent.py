@@ -433,6 +433,206 @@ def send_payments_to_django(payments):
         logging.error(f"Error sending payments to Django: {e}")
         raise
 
+
+def get_credit_note_xml(from_date, to_date):
+    return f"""
+    <ENVELOPE>
+      <HEADER>
+        <VERSION>1</VERSION>
+        <TALLYREQUEST>Export</TALLYREQUEST>
+        <TYPE>Collection</TYPE>
+        <ID>Credit Notes</ID>
+      </HEADER>
+      <BODY>
+        <DESC>
+          <STATICVARIABLES>
+            <SVEXPORTFORMAT>$$SysName:XML</SVEXPORTFORMAT>
+            <EXPLODEFLAG>Yes</EXPLODEFLAG>
+            <SVFROMDATE>{from_date}</SVFROMDATE>
+            <SVTODATE>{to_date}</SVTODATE>
+          </STATICVARIABLES>
+          <TDL>
+            <TDLMESSAGE>
+              <COLLECTION NAME="Credit Notes" ISMODIFY="No">
+                <TYPE>Voucher</TYPE>
+                <FILTER>IsCreditNote</FILTER>
+                <FETCH>DATE, VOUCHERNUMBER, LEDGERENTRIES.LIST, ALLINVENTORYENTRIES.LIST</FETCH>
+              </COLLECTION>
+              <SYSTEM TYPE="Formulae" NAME="IsCreditNote">
+                $VoucherTypeName = "Credit Note"
+              </SYSTEM>
+            </TDLMESSAGE>
+          </TDL>
+        </DESC>
+      </BODY>
+    </ENVELOPE>
+    """
+
+def parse_credit_or_debit_vouchers(xml_data, voucher_type='credit'):
+    invoices = defaultdict(lambda: {
+        "customer_name": "",
+        "note_number": "",
+        "note_date": "",
+        "items": [],
+        "cgst": 0.0,
+        "sgst": 0.0,
+        "total_amount": 0.0,
+        "type": voucher_type
+    })
+
+    xml_data = clean_xml(xml_data)
+    root = ET.fromstring(xml_data)
+
+    for voucher in root.findall(".//VOUCHER"):
+        inv_no = voucher.findtext("VOUCHERNUMBER", default="Unknown")
+        ledger_entry = voucher.find(".//LEDGERENTRIES.LIST")
+        customer = ledger_entry.findtext(".//LEDGERNAME", default="Unknown") if ledger_entry is not None else "Unknown"
+        date_raw = voucher.findtext("DATE", default="")
+        date = f"{date_raw[0:4]}-{date_raw[4:6]}-{date_raw[6:8]}" if len(date_raw) == 8 else date_raw
+
+        key = (inv_no, customer, date)
+
+        invoice = invoices[key]
+        invoice["customer_name"] = customer
+        invoice["note_number"] = inv_no
+        invoice["note_date"] = date
+
+        for item in voucher.findall(".//ALLINVENTORYENTRIES.LIST"):
+            item_name = item.findtext("STOCKITEMNAME", default="")
+            qty = item.findtext("ACTUALQTY", default="")
+            amt = float(item.findtext("AMOUNT", default="0.0"))
+            amt_abs = abs(amt)
+
+            invoice["items"].append({
+                "item_name": item_name,
+                "quantity": qty.strip(),
+                "amount": f"{amt_abs:.2f}"
+            })
+            invoice["total_amount"] += amt_abs
+
+        for ledger in voucher.findall(".//LEDGERENTRIES.LIST"):
+            ledger_name = ledger.findtext("LEDGERNAME", "").lower()
+            amt_abs = float(ledger.findtext("AMOUNT", default="0.0"))
+
+            if "cgst" in ledger_name:
+                invoice["cgst"] += abs(amt_abs)
+            elif "sgst" in ledger_name:
+                invoice["sgst"] += abs(amt_abs)
+
+    return [
+        {
+            **inv,
+            "cgst": f"{inv['cgst']:.2f}",
+            "sgst": f"{inv['sgst']:.2f}",
+            "total_amount": f"{(inv['total_amount'] + inv['cgst'] + inv['sgst']):.2f}"
+        }
+        for inv in invoices.values()
+    ]
+
+def send_credit_notes_to_django(invoices):
+    try:
+        valid_notes = []
+        for inv in invoices:
+            if (
+                inv.get("customer_name") not in [None, "", "Unknown"]
+                and inv.get("note_number") not in [None, "", "Unknown"]
+                and inv.get("note_date")
+                and inv.get("items") and isinstance(inv.get("items"), list)
+            ):
+                valid_notes.append(inv)
+            else:
+                print(f"⚠️ Skipping invalid credit note: {inv}")
+
+        if not valid_notes:
+            raise Exception("No valid credit notes to send.")
+
+        headers = {"Authorization": f"Token {AUTH_TOKEN}"}
+        response = requests.post(
+            "http://127.0.0.1:8000/api/users/credit-notes/",
+            json={"credit_notes": valid_notes},
+            headers=headers
+        )
+
+        if response.status_code != 201:
+            print("🚫 Server responded with error:")
+            print(response.status_code)
+            print(response.json())
+            raise Exception("Failed to send credit notes to server.")
+
+    except requests.exceptions.RequestException as e:
+        logging.error(f"Error sending credit notes to Django: {e}")
+        raise Exception("Failed to send credit notes to server.")
+
+def send_debit_notes_to_django(invoices):
+    try:
+        valid_notes = []
+        for inv in invoices:
+            if (
+                inv.get("customer_name") not in [None, "", "Unknown"]
+                and inv.get("note_number") not in [None, "", "Unknown"]
+                and inv.get("note_date")
+                and inv.get("items") and isinstance(inv.get("items"), list)
+            ):
+                valid_notes.append(inv)
+            else:
+                print(f"⚠️ Skipping invalid debit note: {inv}")
+
+        if not valid_notes:
+            raise Exception("No valid debit notes to send.")
+
+        headers = {"Authorization": f"Token {AUTH_TOKEN}"}
+        response = requests.post(
+            "http://127.0.0.1:8000/api/users/debit-notes/",
+            json={"debit_notes": valid_notes},
+            headers=headers
+        )
+
+        if response.status_code != 201:
+            print("🚫 Server responded with error:")
+            print(response.status_code)
+            print(response.json())
+            raise Exception("Failed to send debit notes to server.")
+
+    except requests.exceptions.RequestException as e:
+        logging.error(f"Error sending debit notes to Django: {e}")
+        raise Exception("Failed to send debit notes to server.")
+
+
+def get_debit_note_xml(from_date, to_date):
+    return f"""
+    <ENVELOPE>
+      <HEADER>
+        <VERSION>1</VERSION>
+        <TALLYREQUEST>Export</TALLYREQUEST>
+        <TYPE>Collection</TYPE>
+        <ID>Debit Notes</ID>
+      </HEADER>
+      <BODY>
+        <DESC>
+          <STATICVARIABLES>
+            <SVEXPORTFORMAT>$$SysName:XML</SVEXPORTFORMAT>
+            <EXPLODEFLAG>Yes</EXPLODEFLAG>
+            <SVFROMDATE>{from_date}</SVFROMDATE>
+            <SVTODATE>{to_date}</SVTODATE>
+          </STATICVARIABLES>
+          <TDL>
+            <TDLMESSAGE>
+              <COLLECTION NAME="Debit Notes" ISMODIFY="No">
+                <TYPE>Voucher</TYPE>
+                <FILTER>IsDebitNote</FILTER>
+                <FETCH>DATE, VOUCHERNUMBER, LEDGERENTRIES.LIST, ALLINVENTORYENTRIES.LIST</FETCH>
+              </COLLECTION>
+              <SYSTEM TYPE="Formulae" NAME="IsDebitNote">
+                $VoucherTypeName = "Debit Note"
+              </SYSTEM>
+            </TDLMESSAGE>
+          </TDL>
+        </DESC>
+      </BODY>
+    </ENVELOPE>
+    """
+
+
 TALLY_REQUEST_XML_BANK_ACCOUNTS = """
 <ENVELOPE>
   <HEADER>
@@ -474,7 +674,6 @@ def parse_bank_ledgers(xml_data):
 
     try:
         xml_data = clean_xml(xml_data)  # Make sure this is defined elsewhere
-        print(xml_data)
         root = ET.fromstring(xml_data)
 
         for ledger in root.findall(".//LEDGER"):
@@ -1371,11 +1570,11 @@ def sync_data():
         # for receipt in receipts:
         #   print(json.dumps(receipt, indent=2))
 
-        if banks:
-          print("\nFetched Bank Ledgers:")
-          for bank in banks:
-            print(json.dumps(bank, indent=2))
-          send_banks_to_django(banks)
+        # if banks:
+        #   print("\nFetched Bank Ledgers:")
+        #   for bank in banks:
+        #     print(json.dumps(bank, indent=2))
+        #   send_banks_to_django(banks)
 
         # Purchase Vouchers
         xml_purchases = get_tally_data(get_purchase_voucher_xml(from_date, to_date))
@@ -1395,6 +1594,17 @@ def sync_data():
         # for payment in payments:
         #   print(json.dumps(payment, indent=2))
 
+        xml_creditnotes=get_tally_data(get_credit_note_xml(from_date,to_date))
+        credit_notes=parse_credit_or_debit_vouchers(xml_creditnotes)
+        print("\nFetched Credit Notes:")
+        for credit in credit_notes:
+          print(json.dumps(credit, indent=2))
+
+        xml_debitnotes=get_tally_data(get_debit_note_xml(from_date,to_date))
+        debit_notes=parse_credit_or_debit_vouchers(xml_debitnotes , voucher_type='debit')
+        print("\nFetched debit Notes:")
+        for debit in debit_notes:
+          print(json.dumps(debit, indent=2))
 
         if customers:
             send_customers_to_django(customers)
@@ -1414,6 +1624,10 @@ def sync_data():
           send_payments_to_django(payments)
         if banks:
           send_banks_to_django(banks)
+        if credit_notes:
+          send_credit_notes_to_django(credit_notes)
+        if debit_notes:
+          send_debit_notes_to_django(debit_notes)
 
         
         status_label.config(text="Syncing data to Django...", fg="blue")

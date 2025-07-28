@@ -131,3 +131,31 @@ class BankAccountSerializer(serializers.ModelSerializer):
         model = BankAccount
         fields = '__all__'
 
+class CreditNoteItemSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = CreditNoteItem
+        fields = ['item_name', 'quantity', 'amount']
+class CreditNoteSerializer(serializers.ModelSerializer):
+    items = CreditNoteItemSerializer(many=True)
+    class Meta:
+        model=CreditNote
+        fields = [
+            'customer_name', 'note_number', 'note_date',
+            'cgst', 'sgst', 'total_amount', 'items'
+        ]
+
+class DebitNoteItemSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = DebitNoteItem
+        fields = ['item_name', 'quantity', 'amount']
+class DebitNoteSerializer(serializers.ModelSerializer):
+    items = DebitNoteItemSerializer(many=True)
+    class Meta:
+        model=DebitNote
+        fields = [
+            'customer_name', 'note_number', 'note_date',
+            'cgst', 'sgst', 'total_amount', 'items'
+        ]
+
+
+

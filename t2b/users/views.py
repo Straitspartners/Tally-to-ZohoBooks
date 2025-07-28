@@ -364,6 +364,303 @@ def sync_invoices(request):
 
     return Response({"message": f"{len(saved_invoices)} invoices synced successfully."}, status=status.HTTP_201_CREATED)
 
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def sync_credit_notes(request):
+    notes = request.data.get("credit_notes", [])
+    if not notes:
+        return Response({"error": "No credit note data provided."}, status=status.HTTP_400_BAD_REQUEST)
+
+    saved_notes = []
+
+    for data in notes:
+        serializer = CreditNoteSerializer(data=data)
+        if serializer.is_valid():
+            note_qs = CreditNote.objects.filter(
+                user=request.user,
+                note_number=serializer.validated_data['note_number']
+            )
+            if note_qs.exists():
+                note = note_qs.first()
+                if not note.fetched_from_tally:
+                    note.customer_name = serializer.validated_data['customer_name']
+                    note.note_date = serializer.validated_data['note_date']
+                    note.cgst = serializer.validated_data['cgst']
+                    note.sgst = serializer.validated_data['sgst']
+                    note.total_amount = serializer.validated_data['total_amount']
+                    note.fetched_from_tally = True
+                    note.save()
+            else:
+                note = CreditNote.objects.create(
+                    user=request.user,
+                    note_number=serializer.validated_data['note_number'],
+                    note_date=serializer.validated_data['note_date'],
+                    customer_name=serializer.validated_data['customer_name'],
+                    cgst=serializer.validated_data['cgst'],
+                    sgst=serializer.validated_data['sgst'],
+                    total_amount=serializer.validated_data['total_amount'],
+                    fetched_from_tally=True
+                )
+
+            # Save related items
+            for item in serializer.validated_data['items']:
+                CreditNoteItem.objects.get_or_create(
+                    credit_note=note,
+                    item_name=item['item_name'],
+                    quantity=item['quantity'],
+                    amount=item['amount'],
+                    defaults={'fetched_from_tally': True}
+                )
+
+            if note.fetched_from_tally:
+                saved_notes.append(note.note_number)
+        else:
+            return Response({
+                "error": "Invalid credit note",
+                "details": serializer.errors,
+                "note": data
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+    return Response({"message": f"{len(saved_notes)} credit notes synced successfully."}, status=status.HTTP_201_CREATED)
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def sync_debit_notes(request):
+    notes = request.data.get("debit_notes", [])
+    if not notes:
+        return Response({"error": "No debit note data provided."}, status=status.HTTP_400_BAD_REQUEST)
+
+    saved_notes = []
+
+    for data in notes:
+        serializer = DebitNoteSerializer(data=data)
+        if serializer.is_valid():
+            note_qs = DebitNote.objects.filter(
+                user=request.user,
+                note_number=serializer.validated_data['note_number']
+            )
+            if note_qs.exists():
+                note = note_qs.first()
+                if not note.fetched_from_tally:
+                    note.customer_name = serializer.validated_data['customer_name']
+                    note.note_date = serializer.validated_data['note_date']
+                    note.cgst = serializer.validated_data['cgst']
+                    note.sgst = serializer.validated_data['sgst']
+                    note.total_amount = serializer.validated_data['total_amount']
+                    note.fetched_from_tally = True
+                    note.save()
+            else:
+                note = DebitNote.objects.create(
+                    user=request.user,
+                    note_number=serializer.validated_data['note_number'],
+                    note_date=serializer.validated_data['note_date'],
+                    customer_name=serializer.validated_data['customer_name'],
+                    cgst=serializer.validated_data['cgst'],
+                    sgst=serializer.validated_data['sgst'],
+                    total_amount=serializer.validated_data['total_amount'],
+                    fetched_from_tally=True
+                )
+
+            for item in serializer.validated_data['items']:
+                DebitNoteItem.objects.get_or_create(
+                    debit_note=note,
+                    item_name=item['item_name'],
+                    quantity=item['quantity'],
+                    amount=item['amount'],
+                    defaults={'fetched_from_tally': True}
+                )
+
+            if note.fetched_from_tally:
+                saved_notes.append(note.note_number)
+        else:
+            return Response({
+                "error": "Invalid debit note",
+                "details": serializer.errors,
+                "note": data
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+    return Response({"message": f"{len(saved_notes)} debit notes synced successfully."}, status=status.HTTP_201_CREATED)
+
+def push_credit_notes_to_zoho(user):
+    access_token, org_id = get_valid_zoho_access_token(user)
+    headers = {
+        "Authorization": f"Zoho-oauthtoken {access_token}",
+        "Content-Type": "application/json"
+    }
+
+    base_url = "https://www.zohoapis.com/books/v3"
+    credit_notes = CreditNote.objects.filter(user=user, zoho_credit_note_id__isnull=True, pushed_to_zoho=False)
+
+    for note in credit_notes:
+        try:
+            ledger = Ledger.objects.get(user=user, name=note.customer_name)
+        except Ledger.DoesNotExist:
+            print(f"[ERROR] Ledger not found for customer '{note.customer_name}'")
+            continue
+
+        if not ledger.zoho_contact_id:
+            print(f"[ERROR] Zoho Contact ID not available for ledger '{ledger.name}'")
+            continue
+
+        customer_id = ledger.zoho_contact_id
+        line_items = []
+
+        for item in note.items.all():
+            match = re.search(r'\d+(\.\d+)?', item.quantity)
+            if not match:
+                print(f"[ERROR] Invalid quantity: {item.quantity}")
+                continue
+            line_items.append({
+                "item_id": "2714114000029138025",
+                "name": item.item_name,
+                "rate": float(item.amount),
+                "quantity": float(match.group())
+            })
+
+        payload = {
+            "customer_id": customer_id,
+            "creditnote_number": note.note_number,
+            "date": note.note_date.strftime('%Y-%m-%d'),
+            "line_items": line_items,
+            
+        }
+
+        url = f"{base_url}/creditnotes?organization_id={org_id}"
+        response = requests.post(url, headers=headers, json=payload)
+
+        try:
+            data = response.json()
+        except Exception as e:
+            print(f"[ERROR] Invalid response for credit note {note.note_number}: {e}")
+            continue
+
+        if response.status_code == 201:
+            note.zoho_credit_note_id = data['creditnote']['creditnote_id']
+            note.pushed_to_zoho = True
+            note.save()
+            print(f"[SUCCESS] Pushed credit note {note.note_number}")
+        else:
+            print(f"[FAILED] Credit note {note.note_number}: {data}")
+
+
+
+# def push_debit_notes_to_zoho(user):
+#     access_token, org_id = get_valid_zoho_access_token(user)
+#     headers = {
+#         "Authorization": f"Zoho-oauthtoken {access_token}",
+#         "Content-Type": "application/json"
+#     }
+
+#     base_url = "https://www.zohoapis.com/books/v3"
+#     debit_notes = DebitNote.objects.filter(user=user, zoho_debit_note_id__isnull=True, pushed_to_zoho=False)
+
+#     for note in debit_notes:
+#         contact_url = f"{base_url}/vendorcredits"
+#         params = {"organization_id": org_id, "contact_name": note.customer_name}
+#         contact_res = requests.get(contact_url, headers=headers, params=params)
+#         contact_data = contact_res.json()
+
+#         if contact_res.status_code != 200 or not contact_data.get("contacts"):
+#             print(f"[ERROR] Vendor '{note.customer_name}' not found.")
+#             continue
+
+#         vendor_id = contact_data['contacts'][0]['contact_id']
+#         line_items = []
+
+#         for item in note.items.all():
+#             match = re.search(r'\d+(\.\d+)?', item.quantity)
+#             if not match:
+#                 print(f"[ERROR] Invalid quantity: {item.quantity}")
+#                 continue
+#             line_items.append({
+#                 "name": item.item_name,
+#                 "rate": float(item.amount),
+#                 "quantity": float(match.group())
+#             })
+
+#         payload = {
+#             "vendor_id": vendor_id,
+#             "creditnote_number": note.note_number,
+#             "date": note.note_date.strftime('%Y-%m-%d'),
+#             "line_items": line_items
+#         }
+
+#         url = f"{base_url}/vendorcredits?organization_id={org_id}"
+#         response = requests.post(url, headers=headers, json=payload)
+
+#         try:
+#             data = response.json()
+#         except Exception as e:
+#             print(f"[ERROR] Invalid response for debit note {note.note_number}: {e}")
+#             continue
+
+#         if response.status_code == 201:
+#             note.zoho_debit_note_id = data['vendor_credit']['vendor_credit_id']
+#             note.pushed_to_zoho = True
+#             note.save()
+#             print(f"[SUCCESS] Pushed debit note {note.note_number}")
+#         else:
+#             print(f"[FAILED] Debit note {note.note_number}: {data}")
+
+def push_debit_notes_to_zoho(user):
+    access_token, org_id = get_valid_zoho_access_token(user)
+    headers = {
+        "Authorization": f"Zoho-oauthtoken {access_token}",
+        "Content-Type": "application/json"
+    }
+
+    base_url = "https://www.zohoapis.com/books/v3"
+    debit_notes = DebitNote.objects.filter(user=user, zoho_debit_note_id__isnull=True, pushed_to_zoho=False)
+
+    for note in debit_notes:
+        try:
+            vendor = Vendor.objects.get(user=user, name=note.customer_name)
+        except Vendor.DoesNotExist:
+            print(f"[ERROR] Vendor '{note.customer_name}' not found in local DB.")
+            continue
+
+        if not vendor.zoho_contact_id:
+            print(f"[ERROR] Vendor '{vendor.name}' is missing Zoho contact ID.")
+            continue
+
+        vendor_id = vendor.zoho_contact_id
+        line_items = []
+
+        for item in note.items.all():
+            match = re.search(r'\d+(\.\d+)?', item.quantity)
+            if not match:
+                print(f"[ERROR] Invalid quantity: {item.quantity}")
+                continue
+            line_items.append({
+                "name": item.item_name,
+                "rate": float(item.amount),
+                "quantity": float(match.group())
+            })
+
+        payload = {
+            "vendor_id": vendor_id,
+            "vendor_credit_number": note.note_number,  # <-- Required field
+            "date": note.note_date.strftime('%Y-%m-%d'),
+            "line_items": line_items
+        }
+
+        url = f"{base_url}/vendorcredits?organization_id={org_id}"
+        response = requests.post(url, headers=headers, json=payload)
+
+        try:
+            data = response.json()
+        except Exception as e:
+            print(f"[ERROR] Invalid response for debit note {note.note_number}: {e}")
+            continue
+
+        if response.status_code == 201:
+            note.zoho_debit_note_id = data['vendor_credit']['vendor_credit_id']
+            note.pushed_to_zoho = True
+            note.save()
+            print(f"[SUCCESS] Pushed debit note {note.note_number}")
+        else:
+            print(f"[FAILED] Debit note {note.note_number}: {data}")
+
 
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
@@ -732,9 +1029,9 @@ def push_taxes_to_zoho(user):
     }
 
     tax_definitions = [
-        {"name": "GST18", "rate": 18.0},
+        {"name": "GSTs18", "rate": 18.0},
         {"name": "GST0", "rate": 0.0},
-        {"name": "GST12", "rate": 12.0},
+        {"name": "GSTs12", "rate": 12.0},
         {"name": "GST28", "rate": 28.0},
         {"name": "GST5", "rate": 5.0},
     ]
@@ -1093,7 +1390,7 @@ from .models import Invoice, InvoiceItem, ZohoBooksCredential
 from .utils import get_valid_zoho_access_token
 import requests
 from django.utils.dateparse import parse_date
-
+import re
 
 def push_invoices_to_zoho(user):
     access_token, org_id = get_valid_zoho_access_token(user)
@@ -1125,10 +1422,16 @@ def push_invoices_to_zoho(user):
         # Step 2: Prepare line_items
         line_items = []
         for item in invoice.items.all():
+            match = re.search(r'\d+(\.\d+)?', item.quantity)
+            if not match:
+                print(f"[ERROR] Invalid quantity format: '{item.quantity}' in invoice {invoice.invoice_number}")
+                continue  # Skip this item if quantity is invalid
+
+            numeric_quantity = float(match.group())
             line_items.append({
                 "name": item.item_name,
                 "rate": float(item.amount),
-                "quantity": 1,  # Optional: parse item.quantity if needed
+                "quantity":numeric_quantity,  # Optional: parse item.quantity if needed
                 # "tax_id":6368368000000243025,
                 # "tax_name": "CGST",
             })
@@ -1156,6 +1459,7 @@ def push_invoices_to_zoho(user):
             print(f"[ERROR] Invalid JSON for invoice {invoice.invoice_number}: {e}")
             continue
 
+        print(f"[ZOHO RESPONSE] Invoice {invoice.invoice_number}: {json.dumps(data, indent=2)}")
         if response.status_code == 201:
             print(f"[SUCCESS] Invoice {invoice.invoice_number} pushed to Zoho.")
 
@@ -1407,10 +1711,15 @@ def push_purchases_to_zoho(user):
         # Step 3: Prepare line_items
         line_items = []
         for item in purchase.items.all():
+            try:
+                quantity = float(re.findall(r"[\d.]+", item.quantity)[0])
+            except (IndexError, ValueError):
+                print(f"[ERROR] Invalid quantity '{item.quantity}' for item '{item.item_name}'")
+                continue
             line_items.append({
                 "name": item.item_name,
                 "rate": float(item.amount),
-                "quantity": 1,
+                "quantity": quantity,
                 "account_id": zoho_account_id
             })
 
@@ -1568,7 +1877,9 @@ def push_all_to_zoho(request):
         # push_receipts_to_zoho(user)
         # push_purchases_to_zoho(user)
         # push_payments_to_zoho(user)
-        push_bank_accounts_to_zoho(user)
+        push_credit_notes_to_zoho(user)
+        push_debit_notes_to_zoho(user)
+        # push_bank_accounts_to_zoho(user)
         return Response({"message": "Data pushed to Zoho Books successfully."})
     except Exception as e:
         return Response({"error": str(e)}, status=500)
@@ -1735,3 +2046,32 @@ class DataMigrationStatusView(APIView):
             "invoices":zoho_invoices,
             "receipts":zoho_receipts
         })
+
+class CustomersDashboard(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        user = request.user
+
+        # Filter data by authenticated user
+        fetched_count = Ledger.objects.filter(user=user, fetched_from_tally=True).count()
+        pushed_count = Ledger.objects.filter(user=user, pushed_to_zoho=True).count()
+        pending_to_push_count = Ledger.objects.filter(
+            user=user,
+            fetched_from_tally=True,
+            pushed_to_zoho=False
+        ).count()
+
+        # Get all ledgers for this user
+        all_ledgers = list(Ledger.objects.filter(user=user).values())
+
+        data = {
+            "summary": {
+                "fetched_from_tally": fetched_count,
+                "pushed_to_zoho": pushed_count,
+                "pending_to_push_to_zoho": pending_to_push_count
+            },
+            "all_ledgers": all_ledgers
+        }
+
+        return Response(data)
