@@ -16,6 +16,8 @@ urlpatterns = [
     path('users/receipts/',views.sync_receipts,name='receipts-sync'),
     path('users/purchases/',views.sync_purchases,name='purchases-sync'),
     path('users/payments/',views.sync_payments,name='payments-sync'),
+    path('users/expenses/',views.sync_expenses,name='expenses-sync'),
+    path('users/journals/',views.sync_journals,name='journals-sync'),
     path('bank-accounts/', BankAccountSyncView.as_view(), name='sync-bank-accounts'),
 
     path('users/credit-notes/', sync_credit_notes, name='sync_credit_notes'),

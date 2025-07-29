@@ -242,6 +242,27 @@ class Payment(models.Model):
     payment_mode = models.CharField(max_length=50)
 
     vendor = models.ForeignKey(Vendor, on_delete=models.SET_NULL, null=True, blank=True)
+
+    invoice_total_amount = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+
+    zoho_payment_id = models.CharField(max_length=100, null=True, blank=True)
+
+    fetched_from_tally = models.BooleanField(default=False)
+    pushed_to_zoho = models.BooleanField(default=False)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ['user', 'payment_number']
+
+class Expenses(models.Model):
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
+    payment_number = models.CharField(max_length=100)
+    payment_date = models.DateField()
+    amount = models.DecimalField(max_digits=10, decimal_places=2)
+    payment_mode = models.CharField(max_length=50)
+
+    vendor = models.ForeignKey(Account, on_delete=models.SET_NULL, null=True, blank=True)
     vendor_zoho_id = models.CharField(max_length=100, null=True, blank=True)
 
     agst_invoice = models.ForeignKey(Purchase, on_delete=models.SET_NULL, null=True, blank=True)
@@ -340,3 +361,23 @@ class DebitNoteItem(models.Model):
 
     def __str__(self):
         return f"{self.item_name} ({self.quantity})"
+
+
+class Journal(models.Model):
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
+    voucher_number = models.CharField(max_length=100)
+    journal_date = models.DateField()
+    narration = models.TextField(blank=True, null=True)
+    fetched_from_tally = models.BooleanField(default=False)
+    zoho_journal_id = models.CharField(max_length=100, blank=True, null=True)
+    pushed_to_zoho = models.BooleanField(default=False)
+
+    class Meta:
+        unique_together = ('user', 'voucher_number')
+
+
+class JournalEntry(models.Model):
+    journal = models.ForeignKey(Journal, related_name='entries', on_delete=models.CASCADE)
+    ledger = models.ForeignKey(Account, on_delete=models.SET_NULL, null=True)
+    amount = models.DecimalField(max_digits=12, decimal_places=2)
+    entry_type = models.CharField(max_length=10, choices=(("Debit", "Debit"), ("Credit", "Credit")))

@@ -522,6 +522,8 @@ def push_credit_notes_to_zoho(user):
             "creditnote_number": note.note_number,
             "date": note.note_date.strftime('%Y-%m-%d'),
             "line_items": line_items,
+
+
             
         }
 
@@ -821,30 +823,31 @@ def sync_payments(request):
         payment_date = entry.get("payment_date")
         amount = entry.get("amount")
         payment_mode = entry.get("payment_mode", "").strip()
-        agst_ref_name = entry.get("agst_ref_name", "").strip()
+        agst_ref_name = entry.get("agst_ref_name")  # Don't strip yet in case it's None
 
+        # Skip if any required fields are missing (except agst_ref_name)
         if not all([payment_number, vendor_name, payment_date, amount]):
-            continue  # skip invalid entries
+            continue
 
-        vendor = Vendor.objects.filter(user=request.user, name__iexact=vendor_name).first()
+        # Check for matching vendor (case-insensitive)
+        vendor = Vendor.objects.filter(user=request.user, name=vendor_name).first()
         if not vendor:
             print(f"❌ Vendor not found: '{vendor_name}' for user {request.user}")
-            continue  # skip if vendor not found
+            continue  # Skip this payment if vendor doesn't exist
 
+        # Try to find the related invoice if agst_ref_name is provided and not blank
         invoice = None
-        invoice_zoho_id = None
-        invoice_total_amount = None
-
         if agst_ref_name:
-            invoice = Invoice.objects.filter(user=request.user, invoice_number=agst_ref_name).first()
-            if invoice:
-                invoice_zoho_id = invoice.zoho_invoice_id
-                invoice_total_amount = invoice.total_amount
+            agst_ref_name = agst_ref_name.strip()
+            if agst_ref_name:
+                invoice = Invoice.objects.filter(user=request.user, invoice_number=agst_ref_name).first()
 
+        # Check if payment already exists
         payment_qs = Payment.objects.filter(user=request.user, payment_number=payment_number)
         if payment_qs.exists():
             payment = payment_qs.first()
             if not payment.fetched_from_tally:
+                # Update existing payment only if not fetched_from_tally
                 payment.payment_date = payment_date
                 payment.amount = amount
                 payment.payment_mode = payment_mode
@@ -854,6 +857,7 @@ def sync_payments(request):
                 payment.save()
                 synced_count += 1
         else:
+            # Create new payment
             Payment.objects.create(
                 user=request.user,
                 payment_number=payment_number,
@@ -868,7 +872,212 @@ def sync_payments(request):
 
         processed_payments.append(payment_number)
 
-    return Response({"message": f"{synced_count} payments synced successfully."}, status=status.HTTP_201_CREATED)
+    return Response(
+        {"message": f"{synced_count} payments synced successfully."},
+        status=status.HTTP_201_CREATED
+    )
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def sync_expenses(request):
+    payments_data = request.data.get("payments", [])
+    if not payments_data:
+        return Response({"error": "No payment data provided."}, status=status.HTTP_400_BAD_REQUEST)
+
+    synced_count = 0
+    processed_payments = []
+
+    for entry in payments_data:
+        payment_number = entry.get("payment_number")
+        vendor_name = (entry.get("vendor_name") or "").strip()
+        payment_date = entry.get("payment_date")
+        amount = entry.get("amount")
+        payment_mode = entry.get("payment_mode", "").strip()
+
+        # Skip if any required fields are missing
+        if not all([payment_number, vendor_name, payment_date, amount]):
+            continue
+
+        # Enforce strict (case-sensitive) match on vendor name
+        vendor = Account.objects.filter(user=request.user, account_name=vendor_name).first()
+        print(vendor)
+        if not vendor:
+            print(f"❌ Exact vendor match not found: '{vendor_name}' for user {request.user}")
+            continue  # Skip this entry
+
+        # Check if payment already exists
+        payment_qs = Expenses.objects.filter(user=request.user, payment_number=payment_number)
+        if payment_qs.exists():
+            payment = payment_qs.first()
+            if not payment.fetched_from_tally:
+                # Update existing payment only if not fetched_from_tally
+                payment.payment_date = payment_date
+                payment.amount = amount
+                payment.payment_mode = payment_mode
+                payment.vendor = vendor
+                payment.fetched_from_tally = True
+                payment.save()
+                synced_count += 1
+        else:
+            # Create new expense
+            Expenses.objects.create(
+                user=request.user,
+                payment_number=payment_number,
+                payment_date=payment_date,
+                amount=amount,
+                payment_mode=payment_mode,
+                vendor=vendor,
+                fetched_from_tally=True
+            )
+            synced_count += 1
+
+        processed_payments.append(payment_number)
+
+    return Response(
+        {
+            "message": f"{synced_count} payments synced successfully.",
+            "processed": processed_payments
+        },
+        status=status.HTTP_201_CREATED
+    )
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def sync_journals(request):
+    journal_data = request.data.get("journals", [])
+    if not journal_data:
+        return Response({"error": "No journal data provided."}, status=status.HTTP_400_BAD_REQUEST)
+
+    synced_count = 0
+    processed_vouchers = []
+
+    for journal_entry in journal_data:
+        voucher_number = journal_entry.get("voucher_number")
+        journal_date = journal_entry.get("journal_date")
+        narration = journal_entry.get("narration", "").strip()
+        entries = journal_entry.get("entries", [])
+
+        if not all([voucher_number, journal_date, entries]):
+            continue
+
+        # Check for existing journal
+        journal_obj, created = Journal.objects.get_or_create(
+            user=request.user,
+            voucher_number=voucher_number,
+            defaults={
+                "journal_date": journal_date,
+                "narration": narration,
+                "fetched_from_tally": True
+            }
+        )
+
+        if not created:
+            if journal_obj.fetched_from_tally:
+                continue  # Already synced
+            journal_obj.journal_date = journal_date
+            journal_obj.narration = narration
+            journal_obj.fetched_from_tally = True
+            journal_obj.save()
+            journal_obj.entries.all().delete()  # Clear old entries
+
+        # Save journal entries
+        for line in entries:
+            ledger_name = line.get("ledger_name", "").strip()
+            amount = line.get("amount")
+            entry_type = line.get("type", "").capitalize()
+
+            if not all([ledger_name, amount, entry_type]):
+                continue
+
+            ledger = Account.objects.filter(user=request.user, account_name=ledger_name).first()
+            if not ledger:
+                print(f"❌ Ledger not found: '{ledger_name}' for user {request.user}")
+                continue
+
+            JournalEntry.objects.create(
+                journal=journal_obj,
+                ledger=ledger,
+                amount=amount,
+                entry_type=entry_type
+            )
+
+        synced_count += 1
+        processed_vouchers.append(voucher_number)
+
+    return Response(
+        {
+            "message": f"{synced_count} journals synced successfully.",
+            "processed": processed_vouchers
+        },
+        status=status.HTTP_201_CREATED
+    )
+
+def push_journals_to_zoho(user):
+    access_token, org_id = get_valid_zoho_access_token(user)
+    base_url = "https://www.zohoapis.com/books/v3"
+    headers = {
+        "Authorization": f"Zoho-oauthtoken {access_token}",
+        "Content-Type": "application/json"
+    }
+
+    # Filter only unsynced journals
+    journals = Journal.objects.filter(user=user, zoho_journal_id__isnull=True, pushed_to_zoho=False)
+
+    for journal in journals:
+        journal_date = journal.journal_date.strftime("%Y-%m-%d")
+        reference_number = journal.voucher_number
+        narration = journal.narration or ""
+
+        line_items = []
+        entries = journal.entries.all()
+        if not entries.exists():
+            print(f"[⚠️ Skipping] Journal {reference_number} has no entries.")
+            continue
+
+        # 🧾 Build line items from journal entries
+        valid_entry = True
+        for entry in entries:
+            account = entry.ledger
+            if not account.zoho_account_id:
+                print(f"[ERROR] Missing zoho_account_id for ledger '{account.account_name}'")
+                valid_entry = False
+                break
+
+            line_items.append({
+                "account_id": account.zoho_account_id,
+                "debit_or_credit": entry.entry_type.lower(),
+                "amount": float(entry.amount)
+            })
+
+        if not valid_entry:
+            continue
+
+        payload = {
+            "journal_date": journal_date,
+            "reference_number": reference_number,
+            "notes": narration,
+            "line_items": line_items
+        }
+
+        # 🚀 Send to Zoho
+        try:
+            response = requests.post(
+                f"{base_url}/journals?organization_id={org_id}",
+                headers=headers,
+                json=payload
+            )
+            data = response.json()
+
+            if "journal" in data and "journal_id" in data["journal"]:
+                journal.zoho_journal_id = data["journal"]["journal_id"]
+                journal.pushed_to_zoho = True
+                journal.save(update_fields=["zoho_journal_id", "pushed_to_zoho"])
+                print(f"[✅ Success] Journal {reference_number} pushed to Zoho.")
+            else:
+                print(f"[❌ Failed] Journal {reference_number}: {data}")
+        except Exception as e:
+            print(f"[Error] Failed to push journal {reference_number}: {e}")
+
 
 # Send the data to Zoho Books (Optional: Example function)
 def send_to_zoho(ledger_data, access_token):
@@ -1365,7 +1574,8 @@ def push_items_to_zoho(user):
             "sku": item.sku or "",
             "hsn_or_sac": item.hsn_code or "",
             "product_type": "goods" if item.product_type.lower() != "service" else "service",
-            "tax_id": zoho_tax.zoho_tax_id
+            "tax_id": zoho_tax.zoho_tax_id,
+            "item_type": "sales_and_purchases",
             
         }
         
@@ -1862,6 +2072,58 @@ def push_payments_to_zoho(user):
         except Exception as e:
             print(f"[Error] Failed to push payment {payment.payment_number}: {e}")
 
+def push_expenses_to_zoho(user):
+    access_token, org_id = get_valid_zoho_access_token(user)
+    base_url = "https://www.zohoapis.com/books/v3"
+    headers = {
+        "Authorization": f"Zoho-oauthtoken {access_token}",
+        "Content-Type": "application/json"
+    }
+
+    expenses = Expenses.objects.filter(user=user, zoho_payment_id__isnull=True, pushed_to_zoho=False)
+
+    for expense in expenses:
+
+        # 🔍 Lookup Zoho account ID via payment_mode
+        try:
+            account = Account.objects.get(user=user, account_name=expense.vendor)
+            account_id = account.zoho_account_id
+            print(account_id)
+            if not account_id:
+                print(f"[ERROR] Missing zoho_account_id for Account: '{account.account_name}'")
+                continue
+        except Account.DoesNotExist:
+            print(f"[ERROR] No Account found for payment_mode: '{expense.payment_mode}'")
+            continue
+
+        # 🧾 Construct payload
+        payload = {
+            "payment_mode": expense.payment_mode,
+            "amount": float(expense.amount),
+            "date": str(expense.payment_date),
+            "account_id": account_id,
+        }
+
+        # 🚀 Send to Zoho
+        try:
+            response = requests.post(
+                f"{base_url}/expenses?organization_id={org_id}",
+                headers=headers,
+                json=payload
+            )
+            data = response.json()
+
+            if ("expense" in data) and "expense_id" in data["expense"]:
+                zoho_payment_id = data["expense"]["expense_id"]
+                expense.zoho_payment_id = zoho_payment_id
+                expense.pushed_to_zoho = True
+                expense.save(update_fields=["zoho_payment_id", "pushed_to_zoho"])
+                print(f"[✅ Success] Expense {expense.payment_number} pushed to Zoho.")
+            else:
+                print(f"[❌ Failed] Expense {expense.payment_number}: {data}")
+        except Exception as e:
+            print(f"[Error] Failed to push expense {expense.payment_number}: {e}")
+
 
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
@@ -1877,8 +2139,10 @@ def push_all_to_zoho(request):
         # push_receipts_to_zoho(user)
         # push_purchases_to_zoho(user)
         # push_payments_to_zoho(user)
-        push_credit_notes_to_zoho(user)
-        push_debit_notes_to_zoho(user)
+        # push_credit_notes_to_zoho(user)
+        # push_debit_notes_to_zoho(user)
+        push_expenses_to_zoho(user)
+        push_journals_to_zoho(user)
         # push_bank_accounts_to_zoho(user)
         return Response({"message": "Data pushed to Zoho Books successfully."})
     except Exception as e:

@@ -433,6 +433,224 @@ def send_payments_to_django(payments):
         logging.error(f"Error sending payments to Django: {e}")
         raise
 
+def get_expenses_voucher_xml(from_date, to_date):
+    return f"""
+    <ENVELOPE>
+      <HEADER>
+        <VERSION>1</VERSION>
+        <TALLYREQUEST>Export</TALLYREQUEST>
+        <TYPE>Collection</TYPE>
+        <ID>Payment Vouchers</ID>
+      </HEADER>
+      <BODY>
+        <DESC>
+          <STATICVARIABLES>
+            <SVEXPORTFORMAT>$$SysName:XML</SVEXPORTFORMAT>
+            <EXPLODEFLAG>Yes</EXPLODEFLAG>
+            <SVFROMDATE>{from_date}</SVFROMDATE>
+            <SVTODATE>{to_date}</SVTODATE>
+          </STATICVARIABLES>
+          <TDL>
+            <TDLMESSAGE>
+              <COLLECTION NAME="Payment Vouchers" ISMODIFY="No">
+                <TYPE>Voucher</TYPE>
+                <FILTER>IsPayment</FILTER>
+                <FETCH>DATE, VOUCHERNUMBER, LEDGERENTRIES.LIST, LEDGERENTRIES.LIST.AMOUNT, LEDGERENTRIES.LIST.LEDGERNAME, LEDGERENTRIES.LIST.CURRENTBALANCE , LEDGERENTRIES.LIST.BILLALLOCATIONS.LIST.NAME</FETCH>
+              </COLLECTION>
+              <SYSTEM TYPE="Formulae" NAME="IsPayment">
+                $VoucherTypeName = "Payment"
+              </SYSTEM>
+            </TDLMESSAGE>
+          </TDL>
+        </DESC>
+      </BODY>
+    </ENVELOPE>
+    """
+def parse_expenses(xml_data):
+    payments = []
+    xml_data = clean_xml(xml_data)
+    root = ET.fromstring(xml_data)
+    
+    for voucher in root.findall(".//VOUCHER"):
+        payment_number = voucher.findtext("VOUCHERNUMBER", default="Unknown").strip()
+        date_str = voucher.findtext("DATE", default="").strip()
+        try:
+            payment_date = f"{date_str[0:4]}-{date_str[4:6]}-{date_str[6:8]}"
+        except:
+            payment_date = date_str
+
+        total_amount = 0.0
+        vendor_name = "Unknown"
+        payment_mode = "Unknown"
+        cur_balance = None
+        ref_name = None
+
+        for ledger in voucher.findall(".//ALLLEDGERENTRIES.LIST"):
+            ledger_name = ledger.findtext("LEDGERNAME", default="").strip()
+            amt_str = ledger.findtext("AMOUNT", default="0.0").strip()
+
+            try:
+                amt = float(amt_str)
+            except:
+                amt = 0.0
+
+            if "bank" in ledger_name.lower() or "cash" in ledger_name.lower():
+                payment_mode = ledger_name
+            else:
+                vendor_name = ledger_name
+                total_amount = abs(amt)  # Make positive
+
+                balance_tags = ["CURRENTBALANCE", "LEDGERCLOSINGBALANCE"]
+                for tag in balance_tags:
+                    balance_str = ledger.findtext(tag)
+                    if balance_str:
+                        try:
+                            cur_balance = float(balance_str)
+                            break
+                        except:
+                            continue
+
+                bill_alloc = ledger.find(".//BILLALLOCATIONS.LIST")
+                if bill_alloc is not None:
+                    ref_name = bill_alloc.findtext("NAME", default=None)
+
+        payments.append({
+            "payment_number": payment_number,
+            "vendor_name": vendor_name,
+            "payment_date": payment_date,
+            "amount": f"{total_amount:.2f}",
+            "payment_mode": payment_mode,
+            "cur_balance": f"{cur_balance:.2f}" if cur_balance is not None else None,
+            "agst_ref_name": ref_name
+        })
+
+    return payments
+
+def send_expenses_to_django(payments):
+    try:
+        valid_payments = []
+        for payment in payments:
+            if (
+                payment.get("vendor_name") not in [None, "", "Unknown"]
+                and payment.get("payment_number") not in [None, "", "Unknown"]
+                and payment.get("payment_date")
+            ):
+                valid_payments.append(payment)
+            else:
+                print(f"⚠️ Skipping invalid payment: {payment}")
+
+        if not valid_payments:
+            raise Exception("No valid payments to send.")
+
+        headers = {"Authorization": f"Token {AUTH_TOKEN}"}
+        response = requests.post(
+            "http://127.0.0.1:8000/api/users/expenses/",
+            json={"payments": valid_payments},
+            headers=headers
+        )
+        response.raise_for_status()
+    except requests.exceptions.RequestException as e:
+        logging.error(f"Error sending payments to Django: {e}")
+        raise
+
+def get_journal_voucher_xml(from_date, to_date):
+    return f"""
+    <ENVELOPE>
+      <HEADER>
+        <VERSION>1</VERSION>
+        <TALLYREQUEST>Export</TALLYREQUEST>
+        <TYPE>Collection</TYPE>
+        <ID>Journal Vouchers</ID>
+      </HEADER>
+      <BODY>
+        <DESC>
+          <STATICVARIABLES>
+            <SVEXPORTFORMAT>$$SysName:XML</SVEXPORTFORMAT>
+            <EXPLODEFLAG>Yes</EXPLODEFLAG>
+            <SVFROMDATE>{from_date}</SVFROMDATE>
+            <SVTODATE>{to_date}</SVTODATE>
+          </STATICVARIABLES>
+          <TDL>
+            <TDLMESSAGE>
+              <COLLECTION NAME="Journal Vouchers" ISMODIFY="No">
+                <TYPE>Voucher</TYPE>
+                <FILTER>IsJournal</FILTER>
+                <FETCH>DATE, VOUCHERNUMBER, NARRATION, LEDGERENTRIES.LIST, LEDGERENTRIES.LIST.AMOUNT, LEDGERENTRIES.LIST.LEDGERNAME, LEDGERENTRIES.LIST.ISDEEMEDPOSITIVE, LEDGERENTRIES.LIST.COSTCENTRENAME, LEDGERENTRIES.LIST.BILLALLOCATIONS.LIST.NAME</FETCH>
+              </COLLECTION>
+              <SYSTEM TYPE="Formulae" NAME="IsJournal">
+                $VoucherTypeName = "Journal"
+              </SYSTEM>
+            </TDLMESSAGE>
+          </TDL>
+        </DESC>
+      </BODY>
+    </ENVELOPE>
+    """
+def parse_journals(xml_data):
+    journals = []
+    xml_data = clean_xml(xml_data)
+    root = ET.fromstring(xml_data)
+
+    for voucher in root.findall(".//VOUCHER"):
+        voucher_number = voucher.findtext("VOUCHERNUMBER", default="Unknown").strip()
+        date_str = voucher.findtext("DATE", default="").strip()
+        narration = voucher.findtext("NARRATION", default="").strip()
+
+        try:
+            journal_date = f"{date_str[0:4]}-{date_str[4:6]}-{date_str[6:8]}"
+        except:
+            journal_date = date_str
+
+        ledger_entries = []
+        for ledger in voucher.findall(".//ALLLEDGERENTRIES.LIST"):
+            ledger_name = ledger.findtext("LEDGERNAME", default="").strip()
+            amount_str = ledger.findtext("AMOUNT", default="0.0").strip()
+            is_deemed_positive = ledger.findtext("ISDEEMEDPOSITIVE", default="Yes").strip()
+            cost_centre = ledger.findtext("COSTCENTRENAME", default=None)
+            ref_name = None
+
+            try:
+                amount = float(amount_str)
+            except:
+                amount = 0.0
+
+            bill_alloc = ledger.find(".//BILLALLOCATIONS.LIST")
+            if bill_alloc is not None:
+                ref_name = bill_alloc.findtext("NAME", default=None)
+
+            ledger_entries.append({
+                "ledger_name": ledger_name,
+                "amount": abs(amount),
+                "type": "Credit" if is_deemed_positive == "Yes" else "Debit",
+                "cost_centre": cost_centre,
+                "ref_name": ref_name
+            })
+
+        journals.append({
+            "voucher_number": voucher_number,
+            "journal_date": journal_date,
+            "narration": narration,
+            "entries": ledger_entries
+        })
+
+    return journals
+def send_journals_to_django(journals):
+    try:
+        valid_journals = [j for j in journals if j.get("voucher_number") and j.get("entries")]
+
+        if not valid_journals:
+            raise Exception("No valid journal vouchers to send.")
+
+        headers = {"Authorization": f"Token {AUTH_TOKEN}"}
+        response = requests.post(
+            "http://127.0.0.1:8000/api/users/journals/",
+            json={"journals": valid_journals},
+            headers=headers
+        )
+        response.raise_for_status()
+    except requests.exceptions.RequestException as e:
+        logging.error(f"Error sending journals to Django: {e}")
+        raise
 
 def get_credit_note_xml(from_date, to_date):
     return f"""
@@ -1090,10 +1308,11 @@ TALLY_TO_ZOHO_ACCOUNT_TYPE = {
     "Sales Accounts": "income",
     "Secured Loans": "other_liability", 
     "Stock-in-Hand": "cost_of_goods_sold", # --
-    "Sundry Creditors": "accounts_payable",
-    "Sundry Debtors": "accounts_receivable",
+    # "Sundry Creditors": "accounts_payable",
+    # "Sundry Debtors": "accounts_receivable",
     "Suspense A/c": "other_liability",
     "Unsecured Loans": "loans_and_borrowing", #--
+    
 }
 # ---------------- XML PARSER ----------------
 
@@ -1590,9 +1809,9 @@ def sync_data():
         xml_payments = get_tally_data(get_payment_voucher_xml(from_date, to_date))
         payments = parse_payments(xml_payments)
 
-        # print("\nFetched Payments:")
-        # for payment in payments:
-        #   print(json.dumps(payment, indent=2))
+        print("\nFetched Payments:")
+        for payment in payments:
+          print(json.dumps(payment, indent=2))
 
         xml_creditnotes=get_tally_data(get_credit_note_xml(from_date,to_date))
         credit_notes=parse_credit_or_debit_vouchers(xml_creditnotes)
@@ -1605,6 +1824,15 @@ def sync_data():
         print("\nFetched debit Notes:")
         for debit in debit_notes:
           print(json.dumps(debit, indent=2))
+
+        xml_expenses=get_tally_data(get_expenses_voucher_xml(from_date,to_date))
+        expenses=parse_expenses(xml_expenses)
+
+        xml_journals=get_tally_data(get_journal_voucher_xml(from_date,to_date))
+        journals=parse_journals(xml_journals)
+        print("\nFetched Journals:")
+        for journal in journals:
+          print(json.dumps(journal, indent=2))
 
         if customers:
             send_customers_to_django(customers)
@@ -1628,6 +1856,10 @@ def sync_data():
           send_credit_notes_to_django(credit_notes)
         if debit_notes:
           send_debit_notes_to_django(debit_notes)
+        if expenses:
+          send_expenses_to_django(expenses)
+        if journals:
+          send_journals_to_django(journals)
 
         
         status_label.config(text="Syncing data to Django...", fg="blue")
