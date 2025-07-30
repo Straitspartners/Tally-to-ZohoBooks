@@ -2498,7 +2498,7 @@ class CustomersDashboard(APIView):
         ).count()
 
         # Get all ledgers for this user
-        all_ledgers = list(Ledger.objects.filter(user=user).values())
+        all_ledgers = list(Ledger.objects.filter(user=user,pushed_to_zoho=True).values())
 
         data = {
             "summary": {
@@ -2527,7 +2527,7 @@ class VendorDashboard(APIView):
         ).count()
 
         # Get all ledgers for this user
-        all_ledgers = list(Vendor.objects.filter(user=user).values())
+        all_ledgers = list(Vendor.objects.filter(user=user,pushed_to_zoho=True).values())
 
         data = {
             "summary": {
@@ -2556,7 +2556,7 @@ class COADashboard(APIView):
         ).count()
 
         # Get all ledgers for this user
-        all_ledgers = list(Account.objects.filter(user=user).values())
+        all_ledgers = list(Account.objects.filter(user=user,pushed_to_zoho=True).values())
 
         data = {
             "summary": {
@@ -2585,7 +2585,7 @@ class ItemsDashboard(APIView):
         ).count()
 
         # Get all ledgers for this user
-        all_ledgers = list(Item.objects.filter(user=user).values())
+        all_ledgers = list(Item.objects.filter(user=user,pushed_to_zoho=True).values())
 
         data = {
             "summary": {
@@ -2616,7 +2616,7 @@ class ReceiptDashboard(APIView):
         ).count()
 
         # Get all ledgers for this user
-        all_ledgers = list(Receipt.objects.filter(user=user).values())
+        all_ledgers = list(Receipt.objects.filter(user=user,pushed_to_zoho=True).values())
 
         data = {
             "summary": {
@@ -2645,7 +2645,7 @@ class PaymentDashboard(APIView):
         ).count()
 
         # Get all ledgers for this user
-        all_ledgers = list(Payment.objects.filter(user=user).values())
+        all_ledgers = list(Payment.objects.filter(user=user,pushed_to_zoho=True).values())
 
         data = {
             "summary": {
