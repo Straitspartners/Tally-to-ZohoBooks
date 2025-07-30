@@ -137,10 +137,11 @@ class CreditNoteItemSerializer(serializers.ModelSerializer):
         fields = ['item_name', 'quantity', 'amount']
 class CreditNoteSerializer(serializers.ModelSerializer):
     items = CreditNoteItemSerializer(many=True)
+    
     class Meta:
         model=CreditNote
         fields = [
-            'customer_name', 'note_number', 'note_date',
+            'customer_name', 'note_number', 'note_date','against_ref',
             'cgst', 'sgst', 'total_amount', 'items'
         ]
 
@@ -153,7 +154,7 @@ class DebitNoteSerializer(serializers.ModelSerializer):
     class Meta:
         model=DebitNote
         fields = [
-            'customer_name', 'note_number', 'note_date',
+            'customer_name', 'note_number', 'note_date',"against_ref",
             'cgst', 'sgst', 'total_amount', 'items'
         ]
 

@@ -87,7 +87,7 @@ TALLY_REQUEST_XML_CUSTOMERS = """
           <COLLECTION NAME="Customer Ledgers" ISMODIFY="No">
             <TYPE>Ledger</TYPE>
             <FILTER>IsSundryDebtor</FILTER>
-            <FETCH>NAME, PARENT, EMAIL ,ADDRESS , LEDGERMOBILE, WEBSITE , LEDSTATENAME ,COUNTRYNAME , PINCODE</FETCH>
+            <FETCH>NAME, PARENT, EMAIL ,ADDRESS , LEDGERMOBILE, WEBSITE , LEDSTATENAME ,COUNTRYNAME , PINCODE , GSTIN, GSTREGISTRATIONTYPE</FETCH>
           </COLLECTION>
           <SYSTEM TYPE="Formulae" NAME="IsSundryDebtor">
              $Parent = "Sundry Debtors"
@@ -674,7 +674,7 @@ def get_credit_note_xml(from_date, to_date):
               <COLLECTION NAME="Credit Notes" ISMODIFY="No">
                 <TYPE>Voucher</TYPE>
                 <FILTER>IsCreditNote</FILTER>
-                <FETCH>DATE, VOUCHERNUMBER, LEDGERENTRIES.LIST, ALLINVENTORYENTRIES.LIST</FETCH>
+                <FETCH>DATE, VOUCHERNUMBER, LEDGERENTRIES.LIST, ALLINVENTORYENTRIES.LIST ,BILLALLOCATIONS.LIST</FETCH>
               </COLLECTION>
               <SYSTEM TYPE="Formulae" NAME="IsCreditNote">
                 $VoucherTypeName = "Credit Note"
@@ -737,12 +737,18 @@ def parse_credit_or_debit_vouchers(xml_data, voucher_type='credit'):
             elif "sgst" in ledger_name:
                 invoice["sgst"] += abs(amt_abs)
 
+            bill_allocation = ledger.find(".//BILLALLOCATIONS.LIST")
+            if bill_allocation is not None:
+                against_ref = bill_allocation.findtext("NAME", default="")  # This is often the reference number
+            if against_ref:
+                invoice["against_ref"] = against_ref
     return [
         {
             **inv,
             "cgst": f"{inv['cgst']:.2f}",
             "sgst": f"{inv['sgst']:.2f}",
-            "total_amount": f"{(inv['total_amount'] + inv['cgst'] + inv['sgst']):.2f}"
+            "total_amount": f"{(inv['total_amount'] + inv['cgst'] + inv['sgst']):.2f}",
+            "against_ref": inv.get("against_ref", "")
         }
         for inv in invoices.values()
     ]
@@ -1326,6 +1332,7 @@ def parse_ledgers(xml_data, ledger_type="customer"):
     ledgers = []
     try:
         xml_data = clean_xml(xml_data)
+        print(xml_data)
         root = ET.fromstring(xml_data)
 
         for ledger in root.findall(".//LEDGER"):
@@ -1337,6 +1344,9 @@ def parse_ledgers(xml_data, ledger_type="customer"):
             state_name = ledger.findtext("LEDSTATENAME", default="")
             country_name = ledger.findtext("COUNTRYNAME", default="")
             pincode = ledger.findtext("PINCODE", default="")
+            gstin = ledger.findtext("GSTIN", default="")
+            gst_reg_type = ledger.findtext("GSTREGISTRATIONTYPE", default="")
+
 
             address_elems = ledger.findall(".//ADDRESS")
             address_lines = [elem.text.strip() for elem in address_elems if elem.text]
@@ -1352,7 +1362,9 @@ def parse_ledgers(xml_data, ledger_type="customer"):
                     "website": website,
                     "state_name": state_name,
                     "country_name": country_name,
-                    "pincode": pincode
+                    "pincode": pincode,
+                    "gstin": gstin,
+                    "gst_registration_type": gst_reg_type
                 })
             elif ledger_type == "vendor" and parent.strip().lower() == "sundry creditors":
                 ledgers.append({
@@ -1364,7 +1376,9 @@ def parse_ledgers(xml_data, ledger_type="customer"):
                     "website": website,
                     "state_name": state_name,
                     "country_name": country_name,
-                    "pincode": pincode
+                    "pincode": pincode,
+                    "gstin": gstin,
+                    "gst_registration_type": gst_reg_type
                 })
 
         return ledgers
@@ -1738,6 +1752,9 @@ def sync_data():
         # Fetch customers
         xml_customers = get_tally_data(TALLY_REQUEST_XML_CUSTOMERS)
         customers = parse_ledgers(xml_customers, ledger_type="customer")
+        for item in customers:
+          print("\nFetched Customer:")
+          print(json.dumps(item, indent=2))
 
         # Fetch and process bank accounts
         xml_banks = get_tally_data(TALLY_REQUEST_XML_BANK_ACCOUNTS)
@@ -1834,30 +1851,30 @@ def sync_data():
         for journal in journals:
           print(json.dumps(journal, indent=2))
 
-        # if customers:
-        #     send_customers_to_django(customers)
-        # if vendors:
-        #     send_vendors_to_django(vendors)
-        # if accounts:
-        #     send_coa_to_django(accounts)
-        # if items:
-        #     send_items_to_django(items)
-        # if invoices:
-        #   send_invoices_to_django(invoices)
-        # if receipts:
-        #   send_receipts_to_django(receipts)
-        # if purchases:
-        #   send_purchases_to_django(purchases)
-        # if payments:
-        #   send_payments_to_django(payments)
-        # if banks:
-        #   send_banks_to_django(banks)
-        # if credit_notes:
-        #   send_credit_notes_to_django(credit_notes)
-        # if debit_notes:
-        #   send_debit_notes_to_django(debit_notes)
-        # if expenses:
-        #   send_expenses_to_django(expenses)
+        if customers:
+            send_customers_to_django(customers)
+        if vendors:
+            send_vendors_to_django(vendors)
+        if accounts:
+            send_coa_to_django(accounts)
+        if items:
+            send_items_to_django(items)
+        if invoices:
+          send_invoices_to_django(invoices)
+        if receipts:
+          send_receipts_to_django(receipts)
+        if purchases:
+          send_purchases_to_django(purchases)
+        if payments:
+          send_payments_to_django(payments)
+        if banks:
+          send_banks_to_django(banks)
+        if credit_notes:
+          send_credit_notes_to_django(credit_notes)
+        if debit_notes:
+          send_debit_notes_to_django(debit_notes)
+        if expenses:
+          send_expenses_to_django(expenses)
         if journals:
           send_journals_to_django(journals)
 

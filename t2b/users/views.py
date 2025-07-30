@@ -189,6 +189,8 @@ def push_taxes_to_zoho(user):
 
     # Step 1: Individual Taxes
     tax_definitions = [
+        {"name": "CGST 14%", "rate": 14.0 , "type":"cgst"},
+        {"name": "SGST 14%", "rate": 14.0, "type":"sgst"},
         {"name": "CGST 9%", "rate": 9.0 , "type":"cgst"},
         {"name": "SGST 9%", "rate": 9.0, "type":"sgst"},
         {"name": "CGST 6%", "rate": 6.0, "type":"cgst"},
@@ -255,6 +257,10 @@ def push_taxes_to_zoho(user):
 
     # Step 2: Tax Groups
     tax_groups = [
+        {
+            "group_name": "GST 28% (CGST 14% + SGST 14%)",
+            "components": ["CGST 14%", "SGST 14%"]
+        },
         {
             "group_name": "GST 18% (CGST 9% + SGST 9%)",
             "components": ["CGST 9%", "SGST 9%"]
@@ -645,6 +651,7 @@ def sync_credit_notes(request):
                     cgst=serializer.validated_data['cgst'],
                     sgst=serializer.validated_data['sgst'],
                     total_amount=serializer.validated_data['total_amount'],
+                    against_ref=serializer.validated_data['against_ref'],
                     fetched_from_tally=True
                 )
 
@@ -704,6 +711,7 @@ def sync_debit_notes(request):
                     cgst=serializer.validated_data['cgst'],
                     sgst=serializer.validated_data['sgst'],
                     total_amount=serializer.validated_data['total_amount'],
+                    against_ref=serializer.validated_data['against_ref'],
                     fetched_from_tally=True
                 )
 
@@ -749,6 +757,7 @@ def push_credit_notes_to_zoho(user):
             continue
 
         customer_id = ledger.zoho_contact_id
+        print(customer_id)
         line_items = []
 
         for item in note.items.all():
@@ -788,9 +797,10 @@ def push_credit_notes_to_zoho(user):
         # Attempt to fetch an associated invoice (if any)
         invoice_id = None
         try:
-            invoice = Invoice.objects.filter(user=user, customer_name=note.customer_name).first()
+            invoice = Invoice.objects.filter(user=user, invoice_number=note.against_ref).first()
             if invoice:
                 invoice_id = invoice.zoho_invoice_id
+                print(invoice_id)
         except Invoice.DoesNotExist:
             print(f"[WARNING] No invoice found for credit note {note.note_number}, proceeding without invoice.")
 
@@ -884,7 +894,7 @@ def push_debit_notes_to_zoho(user):
         # Attempt to fetch associated bill
         bill_id = None
         try:
-            purchase = Purchase.objects.filter(user=user, vendor_name=note.customer_name).first()
+            purchase = Purchase.objects.filter(user=user, purchase_number=note.against_ref).first()
             if purchase and purchase.zoho_bill_id:
                 bill_id = purchase.zoho_bill_id
         except Purchase.DoesNotExist:
@@ -1764,6 +1774,10 @@ def push_items_to_zoho(user):
 
     for item in items:
         zoho_tax = ZohoTax.objects.filter(tax_percentage=item.gst_rate).first()
+        if not zoho_tax:
+            print(f"[Skipped] No ZohoTax found for GST rate {item.gst_rate} on item '{item.name}'")
+            continue  # Skip pushing this item
+        print(zoho_tax)
         data = {
             "name": item.name,
             "rate": float(item.rate),
@@ -2048,7 +2062,7 @@ def push_receipts_to_zoho(user):
         receipt.save(update_fields=["customer_zoho_id", "invoice_zoho_id", "invoice_total_amount"])
 
         payload = {
-            "customer_id": customer_zoho_id,
+            # "customer_id": customer_zoho_id,
             "payment_mode": receipt.payment_mode.lower(),
             "amount": float(invoice_total_amount or receipt.amount),
             "date": str(receipt.receipt_date)
@@ -2208,7 +2222,7 @@ def push_payments_to_zoho(user):
 
         # 🧾 Construct payload
         payload = {
-            "vendor_id": vendor.zoho_contact_id,
+            # "vendor_id": vendor.zoho_contact_id,
             "payment_mode": payment.payment_mode,
             "amount": float(payment.amount),
             "date": str(payment.payment_date),

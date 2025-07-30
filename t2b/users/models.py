@@ -313,6 +313,7 @@ class BankAccount(models.Model):
 
 class CreditNote(models.Model):
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
+    against_ref = models.CharField(max_length=100,null=True,blank=True)
     customer_name = models.CharField(max_length=255)
     note_number = models.CharField(max_length=100)
     note_date = models.DateField()
@@ -340,6 +341,7 @@ class CreditNoteItem(models.Model):
 
 class DebitNote(models.Model):
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
+    against_ref = models.CharField(max_length=100,null=True,blank=True)
     customer_name = models.CharField(max_length=255)
     note_number = models.CharField(max_length=100)
     note_date = models.DateField()
