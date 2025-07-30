@@ -27,6 +27,7 @@
 #         creds.save()
     
 #     return creds.access_token, creds.organization_id
+
 def get_valid_zoho_access_token(user):
     from datetime import timedelta
     from django.utils.timezone import now
@@ -37,7 +38,7 @@ def get_valid_zoho_access_token(user):
 
     if creds.token_expires_at - timedelta(minutes=2) <= now():
         # Refresh token
-        token_url = "https://accounts.zoho.com/oauth/v2/token"
+        token_url = "https://accounts.zoho.in/oauth/v2/token"
         params = {
             "refresh_token": creds.refresh_token,
             "client_id": creds.client_id,

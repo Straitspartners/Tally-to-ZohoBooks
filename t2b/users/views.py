@@ -10,16 +10,62 @@ from rest_framework import status,permissions
 from .models import *
 from .serializers import *
 import requests
+from rest_framework import permissions, status
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from .models import Account
+from .serializers import AccountSerializer
+from .utils import get_valid_zoho_access_token
 
+class BankAccountSyncView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
 
+    def post(self, request):
+        ledgers = request.data.get("banks", [])
+        print("Incoming banks:", ledgers)
 
+        created = []
+        errors = []
+
+        for ledger in ledgers:
+            serializer = BankAccountSerializer(data=ledger)
+            if serializer.is_valid():
+                name = serializer.validated_data.get("name")
+                account_number = serializer.validated_data.get("account_number")
+
+                filters = {
+                    "user": request.user,
+                    "name": name
+                }
+                if account_number:
+                    filters["account_number"] = account_number
+
+                try:
+                    bank_obj = BankAccount.objects.get(**filters)
+                    if not bank_obj.fetched_from_tally:
+                        for attr, value in serializer.validated_data.items():
+                            setattr(bank_obj, attr, value)
+                        bank_obj.fetched_from_tally = True
+                        bank_obj.save()
+                        created.append(bank_obj.name)
+                except BankAccount.DoesNotExist:
+                    new_obj = serializer.save(user=request.user, fetched_from_tally=True)
+                    created.append(new_obj.name)
+            else:
+                print("Serializer errors:", serializer.errors)
+                errors.append({"errors": serializer.errors, "data": ledger})
+
+        return Response({
+            "created": created,
+            "errors": errors
+        }, status=status.HTTP_201_CREATED if not errors else status.HTTP_207_MULTI_STATUS)
 
 def push_bank_accounts_to_zoho(user):
     from .models import BankAccount
     access_token, org_id = get_valid_zoho_access_token(user)
 
     banks = BankAccount.objects.filter(pushed_to_zoho=False)
-    url = f"https://www.zohoapis.com/books/v3/bankaccounts?organization_id={org_id}"
+    url = f"https://www.zohoapis.in/books/v3/bankaccounts?organization_id={org_id}"
     headers = {
         "Authorization": f"Zoho-oauthtoken {access_token}"
     }
@@ -46,6 +92,251 @@ def push_bank_accounts_to_zoho(user):
             print(f"[Bank] {bank.name} → Created in Zoho with ID {zoho_bank_id}")
         else:
             print(f"[Error] Failed to push bank: {bank.name} → {response_data}")
+
+import requests
+from .models import ZohoTax
+
+# def push_taxes_to_zoho(user):
+#     access_token, org_id = get_valid_zoho_access_token(user)
+
+#     print("Access Token:", access_token)
+#     print("Org ID:", org_id)
+
+#     base_url = "https://www.zohoapis.in/books/v3"
+#     headers = {
+#         "Authorization": f"Zoho-oauthtoken {access_token}",
+#         "Content-Type": "application/json"
+#     }
+
+#     tax_definitions = [
+#         {"name": "GSTs18", "rate": 18.0},
+#         {"name": "GST0", "rate": 0.0},
+#         {"name": "GSTs12", "rate": 12.0},
+#         {"name": "GST28", "rate": 28.0},
+#         {"name": "GST5", "rate": 5.0},
+#     ]
+
+#     for tax in tax_definitions:
+#         tax_name = tax["name"]
+#         tax_rate = tax["rate"]
+
+#         # Check if the tax already exists in Zoho
+#         search_url = f"{base_url}/settings/taxes?organization_id={org_id}"
+#         search_response = requests.get(search_url, headers=headers)
+#         try:
+#             taxes_data = search_response.json()
+#         except ValueError:
+#             print(f"[Search Failed] Invalid JSON for tax: {tax_name}")
+#             continue
+
+#         # Skip if tax already exists
+#         if search_response.status_code == 200:
+#             existing_tax = next((t for t in taxes_data.get("taxes", []) if t["tax_name"] == tax_name), None)
+#             if existing_tax:
+#                 print(f"[Skipped] Tax '{tax_name}' already exists in Zoho.")
+#                 # Save tax_id to DB if not saved
+#                 ZohoTax.objects.update_or_create(
+                   
+#                     tax_name=tax_name,
+#                     defaults={"tax_percentage": tax_rate, "zoho_tax_id": existing_tax["tax_id"],"pushed_to_zoho": True}
+#                 )
+#                 continue
+
+#         # Create new tax
+#         payload = {
+#             "tax_name": tax_name,
+#             "tax_percentage": tax_rate,
+#             "tax_type": "tax"  # or "compound_tax" if applicable
+#         }
+
+#         response = requests.post(
+#             f"{base_url}/settings/taxes?organization_id={org_id}",
+#             headers=headers,
+#             json=payload
+#         )
+
+#         try:
+#             data = response.json()
+#         except ValueError:
+#             print(f"[Error] Invalid response when creating tax '{tax_name}'")
+#             continue
+
+#         if response.status_code == 201:
+#             zoho_tax_id = data["tax"]["tax_id"]
+#             print(f"[Success] Tax '{tax_name}' created in Zoho with ID: {zoho_tax_id}")
+#             # Save in local DB
+#             ZohoTax.objects.update_or_create(
+#                 tax_name=tax_name,
+#                 defaults={"tax_percentage": tax_rate, "zoho_tax_id": zoho_tax_id}
+#             )
+#         else:
+#             print(f"[Failed] Could not create tax '{tax_name}'. Status: {response.status_code}, Response: {data}")
+
+import requests
+# Replace with your actual Django model import
+
+def push_taxes_to_zoho(user):
+    access_token, org_id = get_valid_zoho_access_token(user)
+
+    print("Access Token:", access_token)
+    print("Org ID:", org_id)
+
+    base_url = "https://www.zohoapis.in/books/v3"
+    headers = {
+        "Authorization": f"Zoho-oauthtoken {access_token}",
+        "Content-Type": "application/json"
+    }
+
+    # Step 1: Individual Taxes
+    tax_definitions = [
+        {"name": "CGST 9%", "rate": 9.0 , "type":"cgst"},
+        {"name": "SGST 9%", "rate": 9.0, "type":"sgst"},
+        {"name": "CGST 6%", "rate": 6.0, "type":"cgst"},
+        {"name": "SGST 6%", "rate": 6.0, "type":"sgst"},
+        {"name": "CGST 2.5%", "rate": 2.5, "type":"cgst"},
+        {"name": "SGST 2.5%", "rate": 2.5, "type":"sgst"},
+        {"name": "IGST 12%", "rate": 12.0, "type":"igst"},
+        {"name": "IGST 18%", "rate": 18.0, "type":"igst"}
+    ]
+
+    for tax in tax_definitions:
+        tax_name = tax["name"]
+        tax_rate = tax["rate"]
+        tax_type=tax["type"]
+
+        # Fetch current taxes to check for existence
+        search_url = f"{base_url}/settings/taxes?organization_id={org_id}"
+        search_response = requests.get(search_url, headers=headers)
+        try:
+            taxes_data = search_response.json()
+        except ValueError:
+            print(f"[Search Failed] Invalid JSON for tax: {tax_name}")
+            continue
+
+        if search_response.status_code == 200:
+            existing_tax = next((t for t in taxes_data.get("taxes", []) if t["tax_name"] == tax_name), None)
+            if existing_tax:
+                print(f"[Skipped] Tax '{tax_name}' already exists.")
+                # ZohoTax.objects.update_or_create(
+                #     tax_name=tax_name,
+                #     defaults={"tax_percentage": tax_rate, "zoho_tax_id": existing_tax["tax_id"], "pushed_to_zoho": True}
+                # )
+                continue
+
+        # Create new tax
+        payload = {
+            "tax_name": tax_name,
+            "tax_percentage": tax_rate,
+            "tax_type": "tax",
+            "tax_specific_type": tax_type
+        }
+
+        response = requests.post(
+            f"{base_url}/settings/taxes?organization_id={org_id}",
+            headers=headers,
+            json=payload
+        )
+
+        try:
+            data = response.json()
+        except ValueError:
+            print(f"[Error] Invalid response when creating tax '{tax_name}'")
+            continue
+
+        if response.status_code == 201:
+            zoho_tax_id = data["tax"]["tax_id"]
+            print(f"[Success] Tax '{tax_name}' created with ID: {zoho_tax_id}")
+            # ZohoTax.objects.update_or_create(
+            #     tax_name=tax_name,
+            #     defaults={"tax_percentage": tax_rate, "zoho_tax_id": zoho_tax_id, "pushed_to_zoho": True}
+            # )
+        else:
+            print(f"[Failed] Could not create tax '{tax_name}'. Status: {response.status_code}, Response: {data}")
+
+    # Step 2: Tax Groups
+    tax_groups = [
+        {
+            "group_name": "GST 18% (CGST 9% + SGST 9%)",
+            "components": ["CGST 9%", "SGST 9%"]
+        },
+        {
+            "group_name": "GST 12% (CGST 6% + SGST 6%)",
+            "components": ["CGST 6%", "SGST 6%"]
+        },
+        {
+            "group_name": "GST 5% (CGST 2.5% + SGST 2.5%)",
+            "components": ["CGST 2.5%", "SGST 2.5%"]
+        }
+    ]
+
+    # Get updated list of all taxes
+    all_taxes_response = requests.get(f"{base_url}/settings/taxes?organization_id={org_id}", headers=headers)
+    all_taxes = all_taxes_response.json().get("taxes", []) if all_taxes_response.status_code == 200 else []
+
+    # Get existing tax groups
+    group_response = requests.get(f"{base_url}/settings/taxgroups?organization_id={org_id}", headers=headers)
+    existing_groups = group_response.json().get("tax_groups", []) if group_response.status_code == 200 else []
+
+    for group in tax_groups:
+        group_name = group["group_name"]
+        component_names = group["components"]
+
+        if any(g["tax_group_name"] == group_name for g in existing_groups):
+            print(f"[Skipped] Tax group '{group_name}' already exists.")
+            continue
+
+        # Include both tax_id and tax_name as required by Zoho
+        component_taxes = [
+            {"tax_id": t["tax_id"], "tax_name": t["tax_name"]}
+            for t in all_taxes if t["tax_name"] in component_names
+        ]
+
+        if len(component_taxes) < 2:
+            print(f"[Skipped] Tax group '{group_name}' requires 2+ valid components.")
+            continue
+
+        group_payload = {
+            "tax_group_name": group_name,
+            "tax_type": "tax_group",
+            "taxes": ",".join([t["tax_id"] for t in component_taxes])
+        }
+
+        create_group_response = requests.post(
+            f"{base_url}/settings/taxgroups?organization_id={org_id}",
+            headers=headers,
+            json=group_payload
+        )
+
+        try:
+            group_data = create_group_response.json()
+        except ValueError:
+            print(f"[Error] Invalid JSON when creating group '{group_name}'")
+            continue
+
+        if create_group_response.status_code == 201:
+            print(f"[Success] Tax group '{group_name}' created.")
+            tax_group_id = group_data["tax_group"]["tax_group_id"]
+            ZohoTax.objects.update_or_create(
+        tax_name=group_name,
+        defaults={
+            "tax_percentage": sum(
+                [tax["rate"] for tax in tax_definitions if tax["name"] in component_names]
+            ),
+            "zoho_tax_id": tax_group_id,
+            "pushed_to_zoho": True
+        }
+    )
+    #         tax_ids_csv = ",".join([t["tax_id"] for t in component_taxes])
+    #         ZohoTax.objects.update_or_create(
+    #     tax_name=group_name,
+    #     defaults={
+    #         "tax_percentage": sum([tax["rate"] for tax in tax_definitions if tax["name"] in component_names]),
+    #         "zoho_tax_id": tax_ids_csv,
+    #         "pushed_to_zoho": True
+    #     }
+    # )
+        else:
+            print(f"[Failed] Could not create group '{group_name}'. Status: {create_group_response.status_code}, Response: {group_data}")
 
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
@@ -146,11 +437,7 @@ def sync_vendors(request):
 
     return Response({"message": f"{synced_count} vendors synced successfully."}, status=status.HTTP_200_OK)
 
-from rest_framework import permissions, status
-from rest_framework.views import APIView
-from rest_framework.response import Response
-from .models import Account
-from .serializers import AccountSerializer
+
 
 class AccountSyncView(APIView):
     permission_classes = [permissions.IsAuthenticated]
@@ -201,48 +488,7 @@ class AccountSyncView(APIView):
             "errors": errors
         }, status=status.HTTP_201_CREATED if not errors else status.HTTP_207_MULTI_STATUS)
 
-class BankAccountSyncView(APIView):
-    permission_classes = [permissions.IsAuthenticated]
 
-    def post(self, request):
-        ledgers = request.data.get("banks", [])
-        print("Incoming banks:", ledgers)
-
-        created = []
-        errors = []
-
-        for ledger in ledgers:
-            serializer = BankAccountSerializer(data=ledger)
-            if serializer.is_valid():
-                name = serializer.validated_data.get("name")
-                account_number = serializer.validated_data.get("account_number")
-
-                filters = {
-                    "user": request.user,
-                    "name": name
-                }
-                if account_number:
-                    filters["account_number"] = account_number
-
-                try:
-                    bank_obj = BankAccount.objects.get(**filters)
-                    if not bank_obj.fetched_from_tally:
-                        for attr, value in serializer.validated_data.items():
-                            setattr(bank_obj, attr, value)
-                        bank_obj.fetched_from_tally = True
-                        bank_obj.save()
-                        created.append(bank_obj.name)
-                except BankAccount.DoesNotExist:
-                    new_obj = serializer.save(user=request.user, fetched_from_tally=True)
-                    created.append(new_obj.name)
-            else:
-                print("Serializer errors:", serializer.errors)
-                errors.append({"errors": serializer.errors, "data": ledger})
-
-        return Response({
-            "created": created,
-            "errors": errors
-        }, status=status.HTTP_201_CREATED if not errors else status.HTTP_207_MULTI_STATUS)
 
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
@@ -488,7 +734,7 @@ def push_credit_notes_to_zoho(user):
         "Content-Type": "application/json"
     }
 
-    base_url = "https://www.zohoapis.com/books/v3"
+    base_url = "https://www.zohoapis.in/books/v3"
     credit_notes = CreditNote.objects.filter(user=user, zoho_credit_note_id__isnull=True, pushed_to_zoho=False)
 
     for note in credit_notes:
@@ -510,22 +756,53 @@ def push_credit_notes_to_zoho(user):
             if not match:
                 print(f"[ERROR] Invalid quantity: {item.quantity}")
                 continue
-            line_items.append({
-                "item_id": "2714114000029138025",
+
+            # Try to find the matching Item
+            try:
+                matched_item = Item.objects.get(user=user, name=item.item_name)
+            except Item.DoesNotExist:
+                print(f"[ERROR] No matching item found for '{item.item_name}'")
+                continue
+
+            gst_rate = matched_item.gst_rate
+
+            # Try to find the matching ZohoTax
+            try:
+                zoho_tax = ZohoTax.objects.get(tax_percentage=gst_rate)
+                tax_id = zoho_tax.zoho_tax_id
+            except ZohoTax.DoesNotExist:
+                print(f"[WARNING] No Zoho tax found for GST rate {gst_rate} for item '{item.item_name}'")
+                tax_id = None
+
+            line_item_payload = {
                 "name": item.item_name,
                 "rate": float(item.amount),
                 "quantity": float(match.group())
-            })
+            }
+
+            if tax_id:
+                line_item_payload["tax_id"] = tax_id
+
+            line_items.append(line_item_payload)
+
+        # Attempt to fetch an associated invoice (if any)
+        invoice_id = None
+        try:
+            invoice = Invoice.objects.filter(user=user, customer_name=note.customer_name).first()
+            if invoice:
+                invoice_id = invoice.zoho_invoice_id
+        except Invoice.DoesNotExist:
+            print(f"[WARNING] No invoice found for credit note {note.note_number}, proceeding without invoice.")
 
         payload = {
             "customer_id": customer_id,
             "creditnote_number": note.note_number,
             "date": note.note_date.strftime('%Y-%m-%d'),
-            "line_items": line_items,
-
-
-            
+            "line_items": line_items
         }
+
+        if invoice_id:
+            payload["invoice_id"] = invoice_id  # Add associated invoice ID if available
 
         url = f"{base_url}/creditnotes?organization_id={org_id}"
         response = requests.post(url, headers=headers, json=payload)
@@ -545,65 +822,6 @@ def push_credit_notes_to_zoho(user):
             print(f"[FAILED] Credit note {note.note_number}: {data}")
 
 
-
-# def push_debit_notes_to_zoho(user):
-#     access_token, org_id = get_valid_zoho_access_token(user)
-#     headers = {
-#         "Authorization": f"Zoho-oauthtoken {access_token}",
-#         "Content-Type": "application/json"
-#     }
-
-#     base_url = "https://www.zohoapis.com/books/v3"
-#     debit_notes = DebitNote.objects.filter(user=user, zoho_debit_note_id__isnull=True, pushed_to_zoho=False)
-
-#     for note in debit_notes:
-#         contact_url = f"{base_url}/vendorcredits"
-#         params = {"organization_id": org_id, "contact_name": note.customer_name}
-#         contact_res = requests.get(contact_url, headers=headers, params=params)
-#         contact_data = contact_res.json()
-
-#         if contact_res.status_code != 200 or not contact_data.get("contacts"):
-#             print(f"[ERROR] Vendor '{note.customer_name}' not found.")
-#             continue
-
-#         vendor_id = contact_data['contacts'][0]['contact_id']
-#         line_items = []
-
-#         for item in note.items.all():
-#             match = re.search(r'\d+(\.\d+)?', item.quantity)
-#             if not match:
-#                 print(f"[ERROR] Invalid quantity: {item.quantity}")
-#                 continue
-#             line_items.append({
-#                 "name": item.item_name,
-#                 "rate": float(item.amount),
-#                 "quantity": float(match.group())
-#             })
-
-#         payload = {
-#             "vendor_id": vendor_id,
-#             "creditnote_number": note.note_number,
-#             "date": note.note_date.strftime('%Y-%m-%d'),
-#             "line_items": line_items
-#         }
-
-#         url = f"{base_url}/vendorcredits?organization_id={org_id}"
-#         response = requests.post(url, headers=headers, json=payload)
-
-#         try:
-#             data = response.json()
-#         except Exception as e:
-#             print(f"[ERROR] Invalid response for debit note {note.note_number}: {e}")
-#             continue
-
-#         if response.status_code == 201:
-#             note.zoho_debit_note_id = data['vendor_credit']['vendor_credit_id']
-#             note.pushed_to_zoho = True
-#             note.save()
-#             print(f"[SUCCESS] Pushed debit note {note.note_number}")
-#         else:
-#             print(f"[FAILED] Debit note {note.note_number}: {data}")
-
 def push_debit_notes_to_zoho(user):
     access_token, org_id = get_valid_zoho_access_token(user)
     headers = {
@@ -611,7 +829,7 @@ def push_debit_notes_to_zoho(user):
         "Content-Type": "application/json"
     }
 
-    base_url = "https://www.zohoapis.com/books/v3"
+    base_url = "https://www.zohoapis.in/books/v3"
     debit_notes = DebitNote.objects.filter(user=user, zoho_debit_note_id__isnull=True, pushed_to_zoho=False)
 
     for note in debit_notes:
@@ -628,23 +846,61 @@ def push_debit_notes_to_zoho(user):
         vendor_id = vendor.zoho_contact_id
         line_items = []
 
-        for item in note.items.all():
+        for idx, item in enumerate(note.items.all()):
             match = re.search(r'\d+(\.\d+)?', item.quantity)
             if not match:
                 print(f"[ERROR] Invalid quantity: {item.quantity}")
                 continue
-            line_items.append({
-                "name": item.item_name,
-                "rate": float(item.amount),
-                "quantity": float(match.group())
-            })
+
+            item_name_to_use = item.item_name  # First item logic, remains the same
+
+            try:
+                matched_item = Item.objects.get(user=user, name=item_name_to_use)
+            except Item.DoesNotExist:
+                print(f"[ERROR] No matching Item found for '{item_name_to_use}'")
+                matched_item = None
+
+            tax_id = None
+            if matched_item:
+                gst_rate = matched_item.gst_rate
+                try:
+                    zoho_tax = ZohoTax.objects.get(tax_percentage=gst_rate)
+                    tax_id = zoho_tax.zoho_tax_id
+                except ZohoTax.DoesNotExist:
+                    print(f"[WARNING] No ZohoTax found for GST rate {gst_rate} for item '{item_name_to_use}'")
+
+            line_item_payload = {
+                "name": item_name_to_use,
+                "rate": float(item.amount)/ float(match.group()),
+                "quantity": float(match.group()),
+                "item_id":matched_item.zoho_item_id
+            }
+
+            if tax_id:
+                line_item_payload["tax_id"] = tax_id
+
+            line_items.append(line_item_payload)
+
+        # Attempt to fetch associated bill
+        bill_id = None
+        try:
+            purchase = Purchase.objects.filter(user=user, vendor_name=note.customer_name).first()
+            if purchase and purchase.zoho_bill_id:
+                bill_id = purchase.zoho_bill_id
+        except Purchase.DoesNotExist:
+            print(f"[WARNING] No purchase bill found for debit note {note.note_number}, proceeding without bill.")
 
         payload = {
             "vendor_id": vendor_id,
-            "vendor_credit_number": note.note_number,  # <-- Required field
+            "vendor_credit_number": note.note_number,
             "date": note.note_date.strftime('%Y-%m-%d'),
             "line_items": line_items
         }
+
+        if bill_id:
+            payload["bill_id"] = bill_id
+        else:
+            payload["bill_type"] = "goods" 
 
         url = f"{base_url}/vendorcredits?organization_id={org_id}"
         response = requests.post(url, headers=headers, json=payload)
@@ -840,7 +1096,7 @@ def sync_payments(request):
         if agst_ref_name:
             agst_ref_name = agst_ref_name.strip()
             if agst_ref_name:
-                invoice = Invoice.objects.filter(user=request.user, invoice_number=agst_ref_name).first()
+                invoice = Purchase.objects.filter(user=request.user, purchase_number=agst_ref_name).first()
 
         # Check if payment already exists
         payment_qs = Payment.objects.filter(user=request.user, payment_number=payment_number)
@@ -983,6 +1239,7 @@ def sync_journals(request):
         # Save journal entries
         for line in entries:
             ledger_name = line.get("ledger_name", "").strip()
+            print(ledger_name)
             amount = line.get("amount")
             entry_type = line.get("type", "").capitalize()
 
@@ -1014,7 +1271,7 @@ def sync_journals(request):
 
 def push_journals_to_zoho(user):
     access_token, org_id = get_valid_zoho_access_token(user)
-    base_url = "https://www.zohoapis.com/books/v3"
+    base_url = "https://www.zohoapis.in/books/v3"
     headers = {
         "Authorization": f"Zoho-oauthtoken {access_token}",
         "Content-Type": "application/json"
@@ -1038,6 +1295,10 @@ def push_journals_to_zoho(user):
         valid_entry = True
         for entry in entries:
             account = entry.ledger
+            if account is None:
+                print(f"[ERROR] Missing ledger for entry {entry.id} in journal {reference_number}")
+                valid_entry = False
+                break
             if not account.zoho_account_id:
                 print(f"[ERROR] Missing zoho_account_id for ledger '{account.account_name}'")
                 valid_entry = False
@@ -1218,90 +1479,6 @@ class EmailOrUsernameAuthToken(ObtainAuthToken):
 # pip install psycopg2-binary
 # pip install whitenoise
 
-from .utils import get_valid_zoho_access_token
-
-
-
-import requests
-from .models import ZohoTax
-
-def push_taxes_to_zoho(user):
-    access_token, org_id = get_valid_zoho_access_token(user)
-
-    print("Access Token:", access_token)
-    print("Org ID:", org_id)
-
-    base_url = "https://www.zohoapis.com/books/v3"
-    headers = {
-        "Authorization": f"Zoho-oauthtoken {access_token}",
-        "Content-Type": "application/json"
-    }
-
-    tax_definitions = [
-        {"name": "GSTs18", "rate": 18.0},
-        {"name": "GST0", "rate": 0.0},
-        {"name": "GSTs12", "rate": 12.0},
-        {"name": "GST28", "rate": 28.0},
-        {"name": "GST5", "rate": 5.0},
-    ]
-
-    for tax in tax_definitions:
-        tax_name = tax["name"]
-        tax_rate = tax["rate"]
-
-        # Check if the tax already exists in Zoho
-        search_url = f"{base_url}/settings/taxes?organization_id={org_id}"
-        search_response = requests.get(search_url, headers=headers)
-        try:
-            taxes_data = search_response.json()
-        except ValueError:
-            print(f"[Search Failed] Invalid JSON for tax: {tax_name}")
-            continue
-
-        # Skip if tax already exists
-        if search_response.status_code == 200:
-            existing_tax = next((t for t in taxes_data.get("taxes", []) if t["tax_name"] == tax_name), None)
-            if existing_tax:
-                print(f"[Skipped] Tax '{tax_name}' already exists in Zoho.")
-                # Save tax_id to DB if not saved
-                ZohoTax.objects.update_or_create(
-                   
-                    tax_name=tax_name,
-                    defaults={"tax_percentage": tax_rate, "zoho_tax_id": existing_tax["tax_id"],"pushed_to_zoho": True}
-                )
-                continue
-
-        # Create new tax
-        payload = {
-            "tax_name": tax_name,
-            "tax_percentage": tax_rate,
-            "tax_type": "tax"  # or "compound_tax" if applicable
-        }
-
-        response = requests.post(
-            f"{base_url}/settings/taxes?organization_id={org_id}",
-            headers=headers,
-            json=payload
-        )
-
-        try:
-            data = response.json()
-        except ValueError:
-            print(f"[Error] Invalid response when creating tax '{tax_name}'")
-            continue
-
-        if response.status_code == 201:
-            zoho_tax_id = data["tax"]["tax_id"]
-            print(f"[Success] Tax '{tax_name}' created in Zoho with ID: {zoho_tax_id}")
-            # Save in local DB
-            ZohoTax.objects.update_or_create(
-                tax_name=tax_name,
-                defaults={"tax_percentage": tax_rate, "zoho_tax_id": zoho_tax_id}
-            )
-        else:
-            print(f"[Failed] Could not create tax '{tax_name}'. Status: {response.status_code}, Response: {data}")
-
-
 
 import requests
 from .models import Ledger
@@ -1313,7 +1490,7 @@ def push_customers_to_zoho(user):
     print("Org ID:", org_id)
 
     ledgers = Ledger.objects.filter(user=user,zoho_contact_id__isnull=True, pushed_to_zoho=False)
-    base_url = "https://www.zohoapis.com/books/v3"
+    base_url = "https://www.zohoapis.in/books/v3"
     headers = {
         "Authorization": f"Zoho-oauthtoken {access_token}",
         "Content-Type": "application/json"
@@ -1385,16 +1562,47 @@ def push_customers_to_zoho(user):
             print(f"[Failed] {contact_name} → Status: {response.status_code} | Response: {response_data}")
 
 
+# def push_accounts_to_zoho(user):
+#     from .models import Account
+#     access_token, org_id = get_valid_zoho_access_token(user)
+
+#     # Debug print
+#     print("Access Token:", access_token)
+#     print("Org ID:", org_id)
+
+#     accounts = Account.objects.filter(pushed_to_zoho=False)
+#     url = f"https://www.zohoapis.in/books/v3/chartofaccounts?organization_id={org_id}"
+#     headers = {
+#         "Authorization": f"Zoho-oauthtoken {access_token}"
+#     }
+
+#     for account in accounts:
+#         data = {
+#             "account_name": account.account_name,
+#             "account_type": account.account_type,
+#             "account_code": account.account_code
+#         }
+
+#         r = requests.post(url, headers=headers, json=data)
+#         response_data = r.json()
+#         print(f"[Zoho Response] {response_data}")
+
+#         if r.status_code == 201:  # Successfully created
+#             zoho_account_id = response_data['chart_of_account']['account_id']
+#             account.zoho_account_id = zoho_account_id  # assumes your model has this field
+#             account.pushed_to_zoho = True
+#             account.save(update_fields=["zoho_account_id", "pushed_to_zoho"])
+#             print(f"[Account] {account.account_name} → Created in Zoho with ID {zoho_account_id}")
+#         else:
+#             print(f"[Error] Failed to create {account.account_name} →", response_data)
+import requests
+
 def push_accounts_to_zoho(user):
     from .models import Account
     access_token, org_id = get_valid_zoho_access_token(user)
 
-    # Debug print
-    print("Access Token:", access_token)
-    print("Org ID:", org_id)
-
     accounts = Account.objects.filter(pushed_to_zoho=False)
-    url = f"https://www.zohoapis.com/books/v3/chartofaccounts?organization_id={org_id}"
+    post_url = f"https://www.zohoapis.in/books/v3/chartofaccounts?organization_id={org_id}"
     headers = {
         "Authorization": f"Zoho-oauthtoken {access_token}"
     }
@@ -1406,18 +1614,45 @@ def push_accounts_to_zoho(user):
             "account_code": account.account_code
         }
 
-        r = requests.post(url, headers=headers, json=data)
-        response_data = r.json()
+        response = requests.post(post_url, headers=headers, json=data)
+        response_data = response.json()
         print(f"[Zoho Response] {response_data}")
 
-        if r.status_code == 201:  # Successfully created
+        if response.status_code == 201:
+            # Account created successfully
             zoho_account_id = response_data['chart_of_account']['account_id']
-            account.zoho_account_id = zoho_account_id  # assumes your model has this field
+            account.zoho_account_id = zoho_account_id
             account.pushed_to_zoho = True
             account.save(update_fields=["zoho_account_id", "pushed_to_zoho"])
             print(f"[Account] {account.account_name} → Created in Zoho with ID {zoho_account_id}")
+
+        elif response_data.get('code') == 11002:
+            # Account already exists - try to fetch it
+            print(f"[Info] Account '{account.account_name}' already exists. Attempting to fetch from Zoho...")
+
+            search_url = f"https://www.zohoapis.in/books/v3/chartofaccounts?organization_id={org_id}"
+            fetch_response = requests.get(search_url, headers=headers)
+            fetch_data = fetch_response.json()
+
+            if 'chartofaccounts' in fetch_data:
+                matched = next(
+                    (acc for acc in fetch_data['chartofaccounts']
+                     if acc['account_name'].strip().lower() == account.account_name.strip().lower()),
+                    None
+                )
+
+                if matched:
+                    account.zoho_account_id = matched['account_id']
+                    account.pushed_to_zoho = True
+                    account.save(update_fields=["zoho_account_id", "pushed_to_zoho"])
+                    print(f"[Account] {account.account_name} → Linked to existing Zoho ID {matched['account_id']}")
+                else:
+                    print(f"[Warning] Could not find matching account in Zoho for {account.account_name}")
+            else:
+                print(f"[Error] Failed to fetch accounts list from Zoho")
+
         else:
-            print(f"[Error] Failed to create {account.account_name} →", response_data)
+            print(f"[Error] Failed to create or locate {account.account_name} →", response_data)
 
 
 def push_vendors_to_zoho(user):
@@ -1429,7 +1664,7 @@ def push_vendors_to_zoho(user):
     print("Org ID:", org_id)
 
     vendors = Vendor.objects.filter(user=user,pushed_to_zoho=False)
-    base_url = "https://www.zohoapis.com/books/v3"
+    base_url = "https://www.zohoapis.in/books/v3"
     headers = {
         "Authorization": f"Zoho-oauthtoken {access_token}",
         "Content-Type": "application/json"
@@ -1498,7 +1733,7 @@ def push_vendors_to_zoho(user):
 
 def get_or_create_zoho_tax(rate, access_token, org_id):
     headers = {"Authorization": f"Zoho-oauthtoken {access_token}"}
-    tax_url = f"https://www.zohoapis.com/books/v3/settings/taxes?organization_id={org_id}"
+    tax_url = f"https://www.zohoapis.in/books/v3/settings/taxes?organization_id={org_id}"
 
     # Check existing taxes
     resp = requests.get(tax_url, headers=headers)
@@ -1515,51 +1750,13 @@ def get_or_create_zoho_tax(rate, access_token, org_id):
 
     return None
 
-# def push_items_to_zoho(user):
-#     from .models import Item
-#     access_token, org_id = get_valid_zoho_access_token(user)
 
-#     items = Item.objects.filter(user=user)
-#     url = f"https://www.zohoapis.com/books/v3/items?organization_id={org_id}"
-#     headers = {
-#         "Authorization": f"Zoho-oauthtoken {access_token}",
-#         "Content-Type": "application/json"
-#     }
-
-#     for item in items:
-#         data = {
-#             "name": item.name,
-#             "rate": float(item.rate),
-#             "description": item.description or "",
-#             "sku": item.sku or "",
-#             "hsn_or_sac": item.hsn_code or "",
-#             "product_type": "goods" if item.product_type.lower() != "service" else "service"
-#         }
-
-#         if item.gst_applicable.lower() == "applicable" and item.gst_rate > 0:
-#             tax_id = get_or_create_zoho_tax(item.gst_rate, access_token, org_id)
-#             if tax_id:
-#                 data["tax_id"] = tax_id
-#         else:
-#             data["taxability"] = "non-taxable"
-
-#         response = requests.post(url, headers=headers, json=data)
-#         try:
-#             response_data = response.json()
-#         except Exception as e:
-#             print(f"[Item Push Error] Invalid response for {item.name}: {e}")
-#             continue
-
-#         if response.status_code == 201:
-#             print(f"[Success] {item.name} pushed successfully.")
-#         else:
-#             print(f"[Failed] {item.name} → {response_data}")
 def push_items_to_zoho(user):
     from .models import Item, ZohoTax
     access_token, org_id = get_valid_zoho_access_token(user)
 
     items = Item.objects.filter(user=user,pushed_to_zoho=False)
-    url = f"https://www.zohoapis.com/books/v3/items?organization_id={org_id}"
+    url = f"https://www.zohoapis.in/books/v3/items?organization_id={org_id}"
     headers = {
         "Authorization": f"Zoho-oauthtoken {access_token}",
         "Content-Type": "application/json"
@@ -1587,8 +1784,10 @@ def push_items_to_zoho(user):
             continue
 
         if response.status_code == 201:
+            zoho_item_id = response_data.get("item", {}).get("item_id")
             item.pushed_to_zoho = True
-            item.save(update_fields=["pushed_to_zoho"])
+            item.zoho_item_id = zoho_item_id  # Save the Zoho item ID
+            item.save(update_fields=["pushed_to_zoho", "zoho_item_id"])
             print(f"[Success] {item.name} pushed successfully.")
         else:
             print(f"[Failed] {item.name} → {response_data}")
@@ -1596,11 +1795,107 @@ def push_items_to_zoho(user):
         
 
 
-from .models import Invoice, InvoiceItem, ZohoBooksCredential
-from .utils import get_valid_zoho_access_token
-import requests
-from django.utils.dateparse import parse_date
+# from .models import Invoice, InvoiceItem, ZohoBooksCredential
+# from .utils import get_valid_zoho_access_token
+# import requests
+# from django.utils.dateparse import parse_date
+# import re
+
+# def push_invoices_to_zoho(user):
+#     access_token, org_id = get_valid_zoho_access_token(user)
+
+#     headers = {
+#         "Authorization": f"Zoho-oauthtoken {access_token}",
+#         "Content-Type": "application/json"
+#     }
+
+#     base_url = f"https://www.zohoapis.in/books/v3"
+#     invoices = Invoice.objects.filter(user=user, zoho_invoice_id__isnull=True,pushed_to_zoho=False)
+
+#     for invoice in invoices:
+#         # Step 1: Fetch contact_id from customer name
+#         contact_search_url = f"{base_url}/contacts"
+#         params = {
+#             "organization_id": org_id,
+#             "contact_name": invoice.customer_name
+#         }
+#         contact_res = requests.get(contact_search_url, headers=headers, params=params)
+#         contact_data = contact_res.json()
+
+#         if contact_res.status_code != 200 or not contact_data.get("contacts"):
+#             print(f"[ERROR] Customer '{invoice.customer_name}' not found in Zoho.")
+#             continue
+
+#         contact_id = contact_data['contacts'][0]['contact_id']
+
+#         # Step 2: Prepare line_items
+#         line_items = []
+#         for item in invoice.items.all():
+#             match = re.search(r'\d+(\.\d+)?', item.quantity)
+#             if not match:
+#                 print(f"[ERROR] Invalid quantity format: '{item.quantity}' in invoice {invoice.invoice_number}")
+#                 continue  # Skip this item if quantity is invalid
+
+#             numeric_quantity = float(match.group())
+#             line_items.append({
+#                 "name": item.item_name,
+#                 "rate": float(item.amount),
+#                 "quantity":numeric_quantity,  # Optional: parse item.quantity if needed
+#                 # "tax_id":6368368000000243025,
+#                 # "tax_name": "CGST",
+#             })
+
+#         # Step 3: Prepare invoice payload
+#         payload = {
+#             "customer_id": contact_id,
+#             "invoice_number": invoice.invoice_number,
+#             "date": invoice.invoice_date.strftime('%Y-%m-%d'),
+#             "due_date": invoice.invoice_date.strftime('%Y-%m-%d'),
+#             "line_items": line_items,
+#             "cgst": float(invoice.cgst),
+#             "sgst": float(invoice.sgst),
+            
+#             # Do NOT include "status": "sent" here — it is ignored
+#         }
+
+#         # Step 4: POST to Zoho Books
+#         invoice_url = f"{base_url}/invoices?organization_id={org_id}"
+#         response = requests.post(invoice_url, headers=headers, json=payload)
+
+#         try:
+#             data = response.json()
+#         except Exception as e:
+#             print(f"[ERROR] Invalid JSON for invoice {invoice.invoice_number}: {e}")
+#             continue
+
+#         print(f"[ZOHO RESPONSE] Invoice {invoice.invoice_number}: {json.dumps(data, indent=2)}")
+#         if response.status_code == 201:
+#             print(f"[SUCCESS] Invoice {invoice.invoice_number} pushed to Zoho.")
+
+#             # Step 5: Mark invoice as sent to change status from "Draft" → "Sent"
+#             invoice_id = data['invoice']['invoice_id']
+
+#             # ✅ Save Zoho invoice ID in local DB
+#             invoice.zoho_invoice_id = invoice_id
+#             invoice.pushed_to_zoho = True
+#             invoice.save(update_fields=["zoho_invoice_id", "pushed_to_zoho"])
+
+#             mark_sent_url = f"{base_url}/invoices/{invoice_id}/status/sent?organization_id={org_id}"
+#             sent_response = requests.post(mark_sent_url, headers=headers)
+
+#             if sent_response.status_code == 200:
+#                 print(f"[SUCCESS] Invoice {invoice.invoice_number} marked as sent.")
+#             else:
+#                 print(f"[WARNING] Could not mark invoice {invoice.invoice_number} as sent → {sent_response.status_code}: {sent_response.text}")
+#         else:
+#             print(f"[FAILED] Invoice {invoice.invoice_number} → {response.status_code}: {data}")
+
+
+#this is the new one for new gmail including tax id
 import re
+import requests
+import json
+from .models import Invoice, Item, ZohoTax
 
 def push_invoices_to_zoho(user):
     access_token, org_id = get_valid_zoho_access_token(user)
@@ -1610,8 +1905,8 @@ def push_invoices_to_zoho(user):
         "Content-Type": "application/json"
     }
 
-    base_url = f"https://www.zohoapis.com/books/v3"
-    invoices = Invoice.objects.filter(user=user, zoho_invoice_id__isnull=True,pushed_to_zoho=False)
+    base_url = f"https://www.zohoapis.in/books/v3"
+    invoices = Invoice.objects.filter(user=user, zoho_invoice_id__isnull=True, pushed_to_zoho=False)
 
     for invoice in invoices:
         # Step 1: Fetch contact_id from customer name
@@ -1629,22 +1924,51 @@ def push_invoices_to_zoho(user):
 
         contact_id = contact_data['contacts'][0]['contact_id']
 
-        # Step 2: Prepare line_items
+        # Step 2: Prepare line_items with GST tax_id
         line_items = []
+
         for item in invoice.items.all():
             match = re.search(r'\d+(\.\d+)?', item.quantity)
             if not match:
                 print(f"[ERROR] Invalid quantity format: '{item.quantity}' in invoice {invoice.invoice_number}")
-                continue  # Skip this item if quantity is invalid
+                continue
 
             numeric_quantity = float(match.group())
+
+            try:
+                # A: Match with Item master by name and user
+                item_master = Item.objects.get(name=item.item_name, user=user)
+                gst_rate = item_master.gst_rate
+                
+
+                # B: Match with ZohoTax by GST percentage
+                zoho_tax = ZohoTax.objects.get(tax_percentage=gst_rate)
+                print(zoho_tax)
+                tax_id = zoho_tax.zoho_tax_id
+
+                print(tax_id)
+            except Item.DoesNotExist:
+                print(f"[ERROR] Item '{item.item_name}' not found in Item master.")
+                continue
+            except ZohoTax.DoesNotExist:
+                print(f"[ERROR] No ZohoTax found for GST rate {gst_rate} (item: {item.item_name})")
+                continue
+
+            # C: Add item to line_items
             line_items.append({
+                "item_id":"",
                 "name": item.item_name,
-                "rate": float(item.amount),
-                "quantity":numeric_quantity,  # Optional: parse item.quantity if needed
-                # "tax_id":6368368000000243025,
-                # "tax_name": "CGST",
+                "rate": float(item.amount)/numeric_quantity,
+                "quantity": numeric_quantity,
+                "tax_group_id": tax_id,
+                # "tax_type": "tax",
+                "tax_id": tax_id
             })
+
+        # Skip invoice if no valid items
+        if not line_items:
+            print(f"[SKIPPED] Invoice {invoice.invoice_number} has no valid items.")
+            continue
 
         # Step 3: Prepare invoice payload
         payload = {
@@ -1652,11 +1976,9 @@ def push_invoices_to_zoho(user):
             "invoice_number": invoice.invoice_number,
             "date": invoice.invoice_date.strftime('%Y-%m-%d'),
             "due_date": invoice.invoice_date.strftime('%Y-%m-%d'),
-            "line_items": line_items,
-            "cgst": float(invoice.cgst),
-            "sgst": float(invoice.sgst),
-            
-            # Do NOT include "status": "sent" here — it is ignored
+            "line_items": line_items
+            # "cgst": float(invoice.cgst),
+            # "sgst": float(invoice.sgst),
         }
 
         # Step 4: POST to Zoho Books
@@ -1670,13 +1992,14 @@ def push_invoices_to_zoho(user):
             continue
 
         print(f"[ZOHO RESPONSE] Invoice {invoice.invoice_number}: {json.dumps(data, indent=2)}")
+
         if response.status_code == 201:
             print(f"[SUCCESS] Invoice {invoice.invoice_number} pushed to Zoho.")
 
             # Step 5: Mark invoice as sent to change status from "Draft" → "Sent"
             invoice_id = data['invoice']['invoice_id']
 
-            # ✅ Save Zoho invoice ID in local DB
+            # Save Zoho invoice ID in local DB
             invoice.zoho_invoice_id = invoice_id
             invoice.pushed_to_zoho = True
             invoice.save(update_fields=["zoho_invoice_id", "pushed_to_zoho"])
@@ -1691,69 +2014,14 @@ def push_invoices_to_zoho(user):
         else:
             print(f"[FAILED] Invoice {invoice.invoice_number} → {response.status_code}: {data}")
 
+
 import requests
 from decimal import Decimal
 import json
 
-
-# def push_receipts_to_zoho(user):
-#     access_token, org_id = get_valid_zoho_access_token(user)
-#     base_url = "https://www.zohoapis.com/books/v3"
-#     headers = {
-#         "Authorization": f"Zoho-oauthtoken {access_token}",
-#         "Content-Type": "application/json"
-#     }
-
-#     receipts = Receipt.objects.filter(user=user, zoho_receipt_id__isnull=True,pushed_to_zoho=False)
-
-#     for receipt in receipts:
-#         if not receipt.customer_zoho_id:
-#             print(f"[Skipped] Zoho ID missing for customer in receipt {receipt.receipt_number}")
-#             continue
-
-#         payload = {
-#             "customer_id": receipt.customer_zoho_id,
-#             "payment_mode": receipt.payment_mode.lower(),
-#             "amount": float(receipt.invoice_total_amount),
-#             "date": str(receipt.receipt_date)
-#         }
-
-#         if receipt.invoice_zoho_id:
-#             payload["invoices"] = [{
-#                 "invoice_id": receipt.invoice_zoho_id,
-#                 "amount_applied": float(receipt.amount)
-#             }]
-#         # 🔍 Print the payload
-#         print(f"\n📤 Payload for receipt {receipt.receipt_number}:")
-#         print(json.dumps(payload, indent=2))  # pretty print as JSON
-
-#         try:
-#             response = requests.post(
-#                 f"{base_url}/customerpayments?organization_id={org_id}",
-#                 headers=headers,
-#                 json=payload
-#             )
-#             response_data = response.json()
-#         except Exception as e:
-#             print(f"[Error] Request failed for receipt {receipt.receipt_number}: {e}")
-#             continue
-
-#         if response.status_code == 201:
-#             response_data = response.json()
-#             print("🔍 Zoho HTTP Status:", response.status_code)
-#             print("🔍 Zoho Response JSON:")
-#             print(json.dumps(response_data, indent=2))
-#             zoho_payment_id = response_data["payment"]["payment_id"]
-#             receipt.zoho_receipt_id = zoho_payment_id
-#             receipt.pushed_to_zoho = True
-#             receipt.save(update_fields=["zoho_receipt_id", "pushed_to_zoho"])
-#             print(f"[✅ Success] Receipt {receipt.receipt_number} pushed to Zoho. ID: {zoho_payment_id}")
-#         else:
-#             print(f"[❌ Failed] Receipt {receipt.receipt_number} → {response.status_code} → {response_data}")
-
 def push_receipts_to_zoho(user):
     access_token, org_id = get_valid_zoho_access_token(user)
-    base_url = "https://www.zohoapis.com/books/v3"
+    base_url = "https://www.zohoapis.in/books/v3"
     headers = {
         "Authorization": f"Zoho-oauthtoken {access_token}",
         "Content-Type": "application/json"
@@ -1816,73 +2084,6 @@ def push_receipts_to_zoho(user):
             print(f"[❌ Failed] Receipt {receipt.receipt_number} → {response.status_code} → {response_data}")
 
 
-
-
-# def push_purchases_to_zoho(user):
-#     access_token, org_id = get_valid_zoho_access_token(user)
-
-#     headers = {
-#         "Authorization": f"Zoho-oauthtoken {access_token}",
-#         "Content-Type": "application/json"
-#     }
-
-#     base_url = f"https://www.zohoapis.com/books/v3"
-#     purchases = Purchase.objects.filter(user=user, zoho_bill_id__isnull=True, pushed_to_zoho=False)
-
-#     for purchase in purchases:
-#         # Step 1: Find vendor
-#         contact_url = f"{base_url}/contacts"
-#         params = {
-#             "organization_id": org_id,
-#             "contact_name": purchase.vendor_name
-#         }
-#         res = requests.get(contact_url, headers=headers, params=params)
-#         data = res.json()
-
-#         if res.status_code != 200 or not data.get("contacts"):
-#             print(f"[ERROR] Vendor '{purchase.vendor_name}' not found in Zoho.")
-#             continue
-
-#         contact_id = data['contacts'][0]['contact_id']
-
-#         # Step 2: Prepare line_items
-#         line_items = []
-#         for item in purchase.items.all():
-#             if not item.account or not item.account.zoho_account_id:
-#                 print(f"[WARNING] Item '{item.item_name}' has no linked Zoho account. Skipping.")
-#                 continue
-#             line_items.append({
-#                 "name": item.item_name,
-#                 "rate": float(item.amount),
-#                 "quantity": 1,
-#                 "account_id": item.account.zoho_account_id
-#             })
-
-#         payload = {
-#             "vendor_id": contact_id,
-#             "bill_number": purchase.purchase_number,
-#             "date": purchase.purchase_date.strftime('%Y-%m-%d'),
-#             "line_items": line_items,
-#         }
-
-#         # Step 3: Create bill
-#         bill_url = f"{base_url}/bills?organization_id={org_id}"
-#         response = requests.post(bill_url, headers=headers, json=payload)
-
-#         try:
-#             result = response.json()
-#         except:
-#             print(f"[ERROR] Invalid response for bill {purchase.purchase_number}")
-#             continue
-
-#         if response.status_code == 201:
-#             zoho_bill_id = result['bill']['bill_id']
-#             purchase.zoho_bill_id = zoho_bill_id
-#             purchase.pushed_to_zoho = True
-#             purchase.save(update_fields=["zoho_bill_id", "pushed_to_zoho"])
-#             print(f"[SUCCESS] Purchase {purchase.purchase_number} pushed to Zoho.")
-#         else:
-#             print(f"[FAILED] Purchase {purchase.purchase_number} → {response.status_code}: {result}")
 def push_purchases_to_zoho(user):
     access_token, org_id = get_valid_zoho_access_token(user)
 
@@ -1891,7 +2092,7 @@ def push_purchases_to_zoho(user):
         "Content-Type": "application/json"
     }
 
-    base_url = f"https://www.zohoapis.com/books/v3"
+    base_url = f"https://www.zohoapis.in/books/v3"
     purchases = Purchase.objects.filter(user=user, zoho_bill_id__isnull=True, pushed_to_zoho=False)
 
     for purchase in purchases:
@@ -1922,15 +2123,32 @@ def push_purchases_to_zoho(user):
         line_items = []
         for item in purchase.items.all():
             try:
+                # A: Match with Item master by name and user
+                item_master = Item.objects.get(name=item.item_name, user=user)
+                gst_rate = item_master.gst_rate
+
+                # B: Match with ZohoTax by GST percentage
+                zoho_tax = ZohoTax.objects.get(tax_percentage=gst_rate)
+                tax_id = zoho_tax.zoho_tax_id
+                print(tax_id)
+            except Item.DoesNotExist:
+                print(f"[ERROR] Item '{item.item_name}' not found in Item master.")
+                continue
+            except ZohoTax.DoesNotExist:
+                print(f"[ERROR] No ZohoTax found for GST rate {gst_rate} (item: {item.item_name})")
+                continue            
+            try:
                 quantity = float(re.findall(r"[\d.]+", item.quantity)[0])
             except (IndexError, ValueError):
                 print(f"[ERROR] Invalid quantity '{item.quantity}' for item '{item.item_name}'")
                 continue
             line_items.append({
                 "name": item.item_name,
-                "rate": float(item.amount),
+                "rate": float(item.amount)/quantity,
                 "quantity": quantity,
-                "account_id": zoho_account_id
+                "account_id": zoho_account_id,
+                "tax_group_id":tax_id,
+                "tax_id":tax_id
             })
 
         payload = {
@@ -1959,57 +2177,9 @@ def push_purchases_to_zoho(user):
         else:
             print(f"[FAILED] Purchase {purchase.purchase_number} → {response.status_code}: {result}")
 
-# def push_payments_to_zoho(user):
-#     access_token, org_id = get_valid_zoho_access_token(user)
-#     base_url = "https://www.zohoapis.com/books/v3"
-#     headers = {
-#         "Authorization": f"Zoho-oauthtoken {access_token}",
-#         "Content-Type": "application/json"
-#     }
-
-#     payments = Payment.objects.filter(user=user, zoho_payment_id__isnull=True, pushed_to_zoho=False)
-
-#     for payment in payments:
-#         vendor = payment.vendor
-#         invoice = payment.agst_invoice
-
-#         if not vendor or not vendor.zoho_contact_id:
-#             print(f"[Skipped] Missing Zoho ID for vendor {vendor} in payment {payment.payment_number}")
-#             continue
-
-#         payload = {
-#             "vendor_id": vendor.zoho_contact_id,
-#             "payment_mode": payment.payment_mode.lower(),
-#             "amount": float(payment.amount),
-#             "date": str(payment.payment_date)
-#         }
-
-#         if invoice:
-#             payload["invoices"] = [{
-#                 "invoice_id": invoice.zoho_invoice_id,
-#                 "amount_applied": float(payment.amount)
-#             }]
-
-#         try:
-#             response = requests.post(
-#                 f"{base_url}/vendorpayments?organization_id={org_id}",
-#                 headers=headers,
-#                 json=payload
-#             )
-#             data = response.json()
-#             if response.status_code == 201:
-#                 zoho_payment_id = data["payment"]["payment_id"]
-#                 payment.zoho_payment_id = zoho_payment_id
-#                 payment.pushed_to_zoho = True
-#                 payment.save(update_fields=["zoho_payment_id", "pushed_to_zoho"])
-#                 print(f"[✅ Success] Payment {payment.payment_number} pushed to Zoho.")
-#             else:
-#                 print(f"[❌ Failed] Payment {payment.payment_number}: {data}")
-#         except Exception as e:
-#             print(f"[Error] Failed to push payment {payment.payment_number}: {e}")
 def push_payments_to_zoho(user):
     access_token, org_id = get_valid_zoho_access_token(user)
-    base_url = "https://www.zohoapis.com/books/v3"
+    base_url = "https://www.zohoapis.in/books/v3"
     headers = {
         "Authorization": f"Zoho-oauthtoken {access_token}",
         "Content-Type": "application/json"
@@ -2074,7 +2244,7 @@ def push_payments_to_zoho(user):
 
 def push_expenses_to_zoho(user):
     access_token, org_id = get_valid_zoho_access_token(user)
-    base_url = "https://www.zohoapis.com/books/v3"
+    base_url = "https://www.zohoapis.in/books/v3"
     headers = {
         "Authorization": f"Zoho-oauthtoken {access_token}",
         "Content-Type": "application/json"
@@ -2098,7 +2268,7 @@ def push_expenses_to_zoho(user):
 
         # 🧾 Construct payload
         payload = {
-            "payment_mode": expense.payment_mode,
+            "payment_mode": "expense.payment_mode",
             "amount": float(expense.amount),
             "date": str(expense.payment_date),
             "account_id": account_id,
@@ -2131,6 +2301,7 @@ def push_all_to_zoho(request):
     user = request.user
     try:
         # push_taxes_to_zoho(user)
+        # push_bank_accounts_to_zoho(user)
         # push_customers_to_zoho(user)
         # push_vendors_to_zoho(user)
         # push_accounts_to_zoho(user)
@@ -2140,10 +2311,10 @@ def push_all_to_zoho(request):
         # push_purchases_to_zoho(user)
         # push_payments_to_zoho(user)
         # push_credit_notes_to_zoho(user)
-        # push_debit_notes_to_zoho(user)
-        push_expenses_to_zoho(user)
-        push_journals_to_zoho(user)
-        # push_bank_accounts_to_zoho(user)
+        push_debit_notes_to_zoho(user)  
+        # push_expenses_to_zoho(user)
+        # push_journals_to_zoho(user)
+        
         return Response({"message": "Data pushed to Zoho Books successfully."})
     except Exception as e:
         return Response({"error": str(e)}, status=500)

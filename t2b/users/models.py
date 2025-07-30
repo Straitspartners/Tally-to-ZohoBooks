@@ -115,6 +115,7 @@ class Item(models.Model):
     gst_applicable = models.CharField(max_length=50, default="Not Applicable")
     gst_rate = models.DecimalField(max_digits=5, decimal_places=2, default=0.0)
     hsn_code = models.CharField(max_length=20, blank=True, null=True)
+    zoho_item_id = models.CharField(max_length=100, null=True, blank=True)
 
     fetched_from_tally = models.BooleanField(default=False)
     pushed_to_zoho = models.BooleanField(default=False)
@@ -240,7 +241,7 @@ class Payment(models.Model):
     payment_date = models.DateField()
     amount = models.DecimalField(max_digits=10, decimal_places=2)
     payment_mode = models.CharField(max_length=50)
-
+    agst_invoice = models.ForeignKey(Purchase, on_delete=models.SET_NULL, null=True, blank=True)
     vendor = models.ForeignKey(Vendor, on_delete=models.SET_NULL, null=True, blank=True)
 
     invoice_total_amount = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
