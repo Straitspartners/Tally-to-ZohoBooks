@@ -2658,3 +2658,164 @@ class PaymentDashboard(APIView):
 
         return Response(data)
 
+class InvoiceDashboard(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        user = request.user
+
+        # Count summaries
+        total_invoices = Invoice.objects.filter(user=user).count()
+        fetched_count = Invoice.objects.filter(user=user, fetched_from_tally=True).count()
+        pushed_count = Invoice.objects.filter(user=user, pushed_to_zoho=True).count()
+        pending_to_push_count = Invoice.objects.filter(
+            user=user,
+            fetched_from_tally=True,
+            pushed_to_zoho=False
+        ).count()
+
+        # Build invoice data with item names
+        invoices = Invoice.objects.filter(user=user, pushed_to_zoho=True).prefetch_related('items')
+        all_invoices = []
+
+        for invoice in invoices:
+            item_names = list(invoice.items.values_list('item_name', flat=True))
+            all_invoices.append({
+                "invoice_number": invoice.invoice_number,
+                "customer_name": invoice.customer_name,
+                "invoice_date": invoice.invoice_date,
+                "total_amount": invoice.total_amount,
+                "cgst": invoice.cgst,
+                "sgst": invoice.sgst,
+                "zoho_invoice_id": invoice.zoho_invoice_id,
+                "created_at": invoice.created_at,
+                "items": item_names
+            })
+
+        data = {
+            "summary": {
+                "total_invoices": total_invoices,
+                "fetched_from_tally": fetched_count,
+                "pushed_to_zoho": pushed_count,
+                "pending_to_push_to_zoho": pending_to_push_count
+            },
+            "all_invoices": all_invoices
+        }
+
+        return Response(data)
+
+class PurchaseDashboard(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        user = request.user
+
+        total_purchases = Purchase.objects.filter(user=user).count()
+        fetched_count = Purchase.objects.filter(user=user, fetched_from_tally=True).count()
+        pushed_count = Purchase.objects.filter(user=user, pushed_to_zoho=True).count()
+        pending_to_push_count = Purchase.objects.filter(
+            user=user, fetched_from_tally=True, pushed_to_zoho=False
+        ).count()
+
+        purchases = Purchase.objects.filter(user=user, pushed_to_zoho=True).prefetch_related('items')
+        all_purchases = []
+        for purchase in purchases:
+            item_names = list(purchase.items.values_list('item_name', flat=True))
+            all_purchases.append({
+                "purchase_number": purchase.purchase_number,
+                "vendor_name": purchase.vendor_name,
+                "purchase_date": purchase.purchase_date,
+                "total_amount": purchase.total_amount,
+                "cgst": purchase.cgst,
+                "sgst": purchase.sgst,
+                "purchase_ledger": purchase.purchase_ledger,
+                "zoho_bill_id": purchase.zoho_bill_id,
+                "items": item_names,
+            })
+
+        return Response({
+            "summary": {
+                "total_purchases": total_purchases,
+                "fetched_from_tally": fetched_count,
+                "pushed_to_zoho": pushed_count,
+                "pending_to_push_to_zoho": pending_to_push_count
+            },
+            "all_purchases": all_purchases
+        })
+
+class CreditNoteDashboard(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        user = request.user
+
+        total_notes = CreditNote.objects.filter(user=user).count()
+        fetched_count = CreditNote.objects.filter(user=user, fetched_from_tally=True).count()
+        pushed_count = CreditNote.objects.filter(user=user, pushed_to_zoho=True).count()
+        pending_to_push_count = CreditNote.objects.filter(
+            user=user, fetched_from_tally=True, pushed_to_zoho=False
+        ).count()
+
+        notes = CreditNote.objects.filter(user=user, pushed_to_zoho=True).prefetch_related('items')
+        all_notes = []
+        for note in notes:
+            item_names = list(note.items.values_list('item_name', flat=True))
+            all_notes.append({
+                "note_number": note.note_number,
+                "customer_name": note.customer_name,
+                "note_date": note.note_date,
+                "total_amount": note.total_amount,
+                "cgst": note.cgst,
+                "sgst": note.sgst,
+                "zoho_credit_note_id": note.zoho_credit_note_id,
+                "invoice_number": note.invoice.invoice_number if note.invoice else None,
+                "items": item_names,
+            })
+
+        return Response({
+            "summary": {
+                "total_credit_notes": total_notes,
+                "fetched_from_tally": fetched_count,
+                "pushed_to_zoho": pushed_count,
+                "pending_to_push_to_zoho": pending_to_push_count
+            },
+            "all_credit_notes": all_notes
+        })
+
+class DebitNoteDashboard(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        user = request.user
+
+        total_notes = DebitNote.objects.filter(user=user).count()
+        fetched_count = DebitNote.objects.filter(user=user, fetched_from_tally=True).count()
+        pushed_count = DebitNote.objects.filter(user=user, pushed_to_zoho=True).count()
+        pending_to_push_count = DebitNote.objects.filter(
+            user=user, fetched_from_tally=True, pushed_to_zoho=False
+        ).count()
+
+        notes = DebitNote.objects.filter(user=user, pushed_to_zoho=True).prefetch_related('items')
+        all_notes = []
+        for note in notes:
+            item_names = list(note.items.values_list('item_name', flat=True))
+            all_notes.append({
+                "note_number": note.note_number,
+                "customer_name": note.customer_name,
+                "note_date": note.note_date,
+                "total_amount": note.total_amount,
+                "cgst": note.cgst,
+                "sgst": note.sgst,
+                "zoho_debit_note_id": note.zoho_debit_note_id,
+                "items": item_names,
+            })
+
+        return Response({
+            "summary": {
+                "total_debit_notes": total_notes,
+                "fetched_from_tally": fetched_count,
+                "pushed_to_zoho": pushed_count,
+                "pending_to_push_to_zoho": pending_to_push_count
+            },
+            "all_debit_notes": all_notes
+        })

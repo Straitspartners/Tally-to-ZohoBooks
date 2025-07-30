@@ -34,12 +34,17 @@ urlpatterns = [
 
     path('total-records/', TotalRecordsView.as_view(), name='total-records'),
     path('data-migration-status/', DataMigrationStatusView.as_view(), name='data-migration-status'),
-    path('customerdashboard/',  CustomersDashboard.as_view(), name='ledger-summary'),
-     path('vendordashboard/',  VendorDashboard.as_view(), name='ledger-summary'),
-      path('coadashboard/',  COADashboard.as_view(), name='ledger-summary'),
-       path('itemsdashboard/', ItemsDashboard.as_view(), name='ledger-summary'),
-        path('receiptdashboard/', ReceiptDashboard.as_view(), name='ledger-summary'),
-     path('paymentdashboard/', PaymentDashboard.as_view(), name='ledger-summary'),
+    path('customerdashboard/',  CustomersDashboard.as_view(), name='customer-summary'),
+     path('vendordashboard/',  VendorDashboard.as_view(), name='vendor-summary'),
+      path('coadashboard/',  COADashboard.as_view(), name='coa-summary'),
+       path('itemsdashboard/', ItemsDashboard.as_view(), name='items-summary'),
+        path('receiptdashboard/', ReceiptDashboard.as_view(), name='receipt-summary'),
+     path('paymentdashboard/', PaymentDashboard.as_view(), name='payement-summary'),
+     path('invoicesdashboard/',InvoiceDashboard.as_view(),name='invoice-summary'),
+      path('purchasesdashboard/', PurchaseDashboard.as_view(), name='purchase-summary'),
+    path('creditnotesdashboard/', CreditNoteDashboard.as_view(), name='creditnote-summary'),
+    path('debitnotesdashboard/', DebitNoteDashboard.as_view(), name='debitnote-summary'),
+     
 
 ]
 
