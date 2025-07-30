@@ -2300,20 +2300,20 @@ def push_expenses_to_zoho(user):
 def push_all_to_zoho(request):
     user = request.user
     try:
-        # push_taxes_to_zoho(user)
-        # push_bank_accounts_to_zoho(user)
-        # push_customers_to_zoho(user)
-        # push_vendors_to_zoho(user)
-        # push_accounts_to_zoho(user)
-        # push_items_to_zoho(user)
-        # push_invoices_to_zoho(user)
-        # push_receipts_to_zoho(user)
-        # push_purchases_to_zoho(user)
-        # push_payments_to_zoho(user)
-        # push_credit_notes_to_zoho(user)
+        push_taxes_to_zoho(user)
+        push_bank_accounts_to_zoho(user)
+        push_customers_to_zoho(user)
+        push_vendors_to_zoho(user)
+        push_accounts_to_zoho(user)
+        push_items_to_zoho(user)
+        push_invoices_to_zoho(user)
+        push_receipts_to_zoho(user)
+        push_purchases_to_zoho(user)
+        push_payments_to_zoho(user)
+        push_credit_notes_to_zoho(user)
         push_debit_notes_to_zoho(user)  
-        # push_expenses_to_zoho(user)
-        # push_journals_to_zoho(user)
+        push_expenses_to_zoho(user)
+        push_journals_to_zoho(user)
         
         return Response({"message": "Data pushed to Zoho Books successfully."})
     except Exception as e:
