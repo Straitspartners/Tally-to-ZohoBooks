@@ -260,8 +260,8 @@ def get_sales_voucher_xml(from_date, to_date):
           <STATICVARIABLES>
             <SVEXPORTFORMAT>$$SysName:XML</SVEXPORTFORMAT>
             <EXPLODEFLAG>Yes</EXPLODEFLAG>
-            <SVFROMDATE>20250401</SVFROMDATE>
-            <SVTODATE>20260331</SVTODATE>
+            <SVFROMDATE>{from_date}</SVFROMDATE>
+            <SVTODATE>{to_date}</SVTODATE>
           </STATICVARIABLES>
           <TDL>
             <TDLMESSAGE>
@@ -271,11 +271,9 @@ def get_sales_voucher_xml(from_date, to_date):
                 <FETCH>DATE, VOUCHERNUMBER, LEDGERENTRIES.LIST, ALLINVENTORYENTRIES.LIST</FETCH>
               </COLLECTION>
               <SYSTEM TYPE="Formulae" NAME="IsSales">
-                $VoucherTypeName = "Sales "
+                $VoucherTypeName = "Sales"
               </SYSTEM>
-              <SYSTEM TYPE="Formulae" NAME="DateFilter">
-                $$Date >= DATE "20250401" AND $$Date <= DATE "20260331"
-              </SYSTEM>
+             
             </TDLMESSAGE>
           </TDL>
         </DESC>
@@ -310,9 +308,6 @@ def get_receipt_voucher_xml(from_date, to_date):
               <SYSTEM TYPE="Formulae" NAME="IsReceipt">
                 $VoucherTypeName = "Receipt"
               </SYSTEM>
-                <SYSTEM TYPE="Formulae" NAME="DateFilter">
-                $$Date >= DATE "{from_date}" AND $$Date <= DATE "{to_date}"
-              </SYSTEM>
             </TDLMESSAGE>
           </TDL>
         </DESC>
@@ -346,9 +341,7 @@ def get_payment_voucher_xml(from_date, to_date):
               <SYSTEM TYPE="Formulae" NAME="IsPayment">
                 $VoucherTypeName = "Payment"
               </SYSTEM>
-                <SYSTEM TYPE="Formulae" NAME="DateFilter">
-                $$Date >= DATE "{from_date}" AND $$Date <= DATE "{to_date}"
-              </SYSTEM>
+                
             </TDLMESSAGE>
           </TDL>
         </DESC>
@@ -468,9 +461,6 @@ def get_expenses_voucher_xml(from_date, to_date):
               </COLLECTION>
               <SYSTEM TYPE="Formulae" NAME="IsPayment">
                 $VoucherTypeName = "Payment"
-              </SYSTEM>
-                <SYSTEM TYPE="Formulae" NAME="DateFilter">
-                $$Date >= DATE "{from_date}" AND $$Date <= DATE "{to_date}"
               </SYSTEM>
             </TDLMESSAGE>
           </TDL>
@@ -592,9 +582,6 @@ def get_journal_voucher_xml(from_date, to_date):
               <SYSTEM TYPE="Formulae" NAME="IsJournal">
                 $VoucherTypeName = "Journal"
               </SYSTEM>
-                <SYSTEM TYPE="Formulae" NAME="DateFilter">
-                $$Date >= DATE "{from_date}" AND $$Date <= DATE "{to_date}"
-              </SYSTEM>
             </TDLMESSAGE>
           </TDL>
         </DESC>
@@ -693,9 +680,6 @@ def get_credit_note_xml(from_date, to_date):
               </COLLECTION>
               <SYSTEM TYPE="Formulae" NAME="IsCreditNote">
                 $VoucherTypeName = "Credit Note"
-              </SYSTEM>
-                <SYSTEM TYPE="Formulae" NAME="DateFilter">
-                $$Date >= DATE "{from_date}" AND $$Date <= DATE "{to_date}"
               </SYSTEM>
             </TDLMESSAGE>
           </TDL>
@@ -951,9 +935,6 @@ def get_debit_note_xml(from_date, to_date):
               <SYSTEM TYPE="Formulae" NAME="IsDebitNote">
                 $VoucherTypeName = "Debit Note"
               </SYSTEM>
-              <SYSTEM TYPE="Formulae" NAME="DateFilter">
-                $$Date >= DATE "{from_date}" AND $$Date <= DATE "{to_date}"
-              </SYSTEM>
             </TDLMESSAGE>
           </TDL>
         </DESC>
@@ -1169,9 +1150,6 @@ def get_purchase_voucher_xml(from_date, to_date):
               </COLLECTION>
               <SYSTEM TYPE="Formulae" NAME="IsPurchase">
                 $VoucherTypeName = "Purchase"
-              </SYSTEM>
-                <SYSTEM TYPE="Formulae" NAME="DateFilter">
-                $$Date >= DATE "{from_date}" AND $$Date <= DATE "{to_date}"
               </SYSTEM>
             </TDLMESSAGE>
           </TDL>
@@ -2043,7 +2021,7 @@ import json
 
 root = tk.Tk()
 root.title("Tally Sync Agent")
-root.geometry("380x350")
+root.geometry("380x300")
 root.resizable(False, False)
 
 title_label = tk.Label(root, text="Tally → Books Sync", font=("Arial", 16, "bold"))
@@ -2060,7 +2038,7 @@ password_var = tk.StringVar()
 tk.Entry(root, textvariable=password_var, show="*").pack()
 
 # Financial Year dropdown
-financial_years = [f"April {year} to March {year+1}" for year in range(2015, 2027)]
+financial_years = [f"April {year} to March {year+1}" for year in range(2015, 2026)]
 fy_var = tk.StringVar()
 fy_var.set(financial_years[-1])  # default to last FY option
 
@@ -2068,8 +2046,18 @@ tk.Label(root, text="Financial Year").pack()
 fy_dropdown = ttk.Combobox(root, textvariable=fy_var, values=financial_years, state="readonly")
 fy_dropdown.pack()
 
-status_label = tk.Label(root, text="", font=("Arial", 10))
-status_label.pack(pady=10)
+# Precautionary Note (like in Tally)
+precaution_label = tk.Label(
+    root,
+    text="⚠️ Please ensure that the company you want to \nmigrate is open in Tally, \n& \n The selected financial year is active in Tally.",
+    fg="red",
+    font=("Arial", 10, "bold"),
+    justify="center"
+)
+precaution_label.pack(pady=10)
+
+status_label = tk.Label(root, text="", font=("Arial", 1))
+status_label.pack(pady=5)
 
 footer = tk.Label(root, text="v1.0 - Developed by Your Straits Partners", font=("Arial", 8), fg="gray")
 footer.pack(side="bottom", pady=5)
@@ -2099,7 +2087,7 @@ def login_and_sync():
     sync_data(from_date, to_date)
 
 sync_btn = tk.Button(root, text="Login & Sync", command=login_and_sync, font=("Arial", 12), bg="green", fg="white")
-sync_btn.pack(pady=20)
+sync_btn.pack(pady=10)
 
 status_label = tk.Label(root, text="", font=("Arial", 10))
 status_label.pack()
