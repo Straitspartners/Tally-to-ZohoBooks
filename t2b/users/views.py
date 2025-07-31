@@ -77,7 +77,8 @@ def push_bank_accounts_to_zoho(user):
             "account_number": bank.account_number,
             "ifsc_code": bank.ifsc_code,
             "bank_name": bank.bank_name,
-            "branch_name": bank.branch_name
+            "branch_name": bank.branch_name,
+           "opening_balance": float(bank.opening_balance)
         }
 
         r = requests.post(url, headers=headers, json=data)
@@ -356,7 +357,7 @@ def sync_ledgers(request):
         name = entry.get('name')
         if not name:
             continue  # skip entries without a name
-
+        opening_balance = entry.get("opening_balance", "0")
         # Check for existing ledger
         ledger_qs = Ledger.objects.filter(user=request.user, name=name)
         if ledger_qs.exists():
@@ -371,6 +372,7 @@ def sync_ledgers(request):
                 ledger.state_name = entry.get("state_name", None)
                 ledger.country_name = entry.get("country_name", None)
                 ledger.pincode = entry.get("pincode", None)
+                ledger.opening_balance = opening_balance
                 ledger.fetched_from_tally = True
                 ledger.save()
                 synced_count += 1
@@ -388,6 +390,7 @@ def sync_ledgers(request):
                 state_name=entry.get("state_name", None),
                 country_name=entry.get("country_name", None),
                 pincode=entry.get("pincode", None),
+                opening_balance=opening_balance, 
                 fetched_from_tally=True
             )
             synced_count += 1
@@ -403,13 +406,13 @@ def sync_vendors(request):
     vendors = request.data.get("ledgers", [])
     if not vendors:
         return Response({"error": "No vendors provided in the request."}, status=status.HTTP_400_BAD_REQUEST)
-
+    
     synced_count = 0
     for entry in vendors:
         name = entry.get('name')
         if not name:
             continue
-
+        opening_balance = entry.get("opening_balance", "0")
         vendor_qs = Vendor.objects.filter(user=request.user, name=name)
         if vendor_qs.exists():
             vendor = vendor_qs.first()
@@ -422,6 +425,7 @@ def sync_vendors(request):
                 vendor.state_name = entry.get("state_name", None)
                 vendor.country_name = entry.get("country_name", None)
                 vendor.pincode = entry.get("pincode", None)
+                vendor.opening_balance = opening_balance
                 vendor.fetched_from_tally = True
                 vendor.save()
                 synced_count += 1
@@ -437,6 +441,7 @@ def sync_vendors(request):
                 state_name=entry.get("state_name", None),
                 country_name=entry.get("country_name", None),
                 pincode=entry.get("pincode", None),
+                opening_balance=opening_balance, 
                 fetched_from_tally=True
             )
             synced_count += 1
@@ -455,6 +460,7 @@ class AccountSyncView(APIView):
 
         for account_data in accounts_data:
             serializer = AccountSerializer(data=account_data)
+
             if serializer.is_valid():
                 account_code = account_data.get("account_code")
                 if not account_code:
@@ -483,6 +489,7 @@ class AccountSyncView(APIView):
                         account_code=serializer.validated_data.get("account_code", ""),
                         account_type=serializer.validated_data.get("account_type", ""),
                         zoho_account_id=serializer.validated_data.get("zoho_account_id", ""),
+                        opening_balance=serializer.validated_data.get("opening_balance",0), 
                         fetched_from_tally=True
                     )
                     created.append(account_obj.account_code)
@@ -640,6 +647,7 @@ def sync_credit_notes(request):
                     note.cgst = serializer.validated_data['cgst']
                     note.sgst = serializer.validated_data['sgst']
                     note.total_amount = serializer.validated_data['total_amount']
+                    note.ledger_type = serializer.validated_data.get('ledger_type', '') 
                     note.fetched_from_tally = True
                     note.save()
             else:
@@ -652,6 +660,7 @@ def sync_credit_notes(request):
                     sgst=serializer.validated_data['sgst'],
                     total_amount=serializer.validated_data['total_amount'],
                     against_ref=serializer.validated_data['against_ref'],
+                    ledger_type=serializer.validated_data.get('ledger_type', ''), 
                     fetched_from_tally=True
                 )
 
@@ -700,6 +709,7 @@ def sync_debit_notes(request):
                     note.cgst = serializer.validated_data['cgst']
                     note.sgst = serializer.validated_data['sgst']
                     note.total_amount = serializer.validated_data['total_amount']
+                    note.ledger_type = serializer.validated_data.get('ledger_type', '') 
                     note.fetched_from_tally = True
                     note.save()
             else:
@@ -712,6 +722,7 @@ def sync_debit_notes(request):
                     sgst=serializer.validated_data['sgst'],
                     total_amount=serializer.validated_data['total_amount'],
                     against_ref=serializer.validated_data['against_ref'],
+                    ledger_type=serializer.validated_data.get('ledger_type', ''), 
                     fetched_from_tally=True
                 )
 
@@ -782,11 +793,14 @@ def push_credit_notes_to_zoho(user):
             except ZohoTax.DoesNotExist:
                 print(f"[WARNING] No Zoho tax found for GST rate {gst_rate} for item '{item.item_name}'")
                 tax_id = None
-
+            matched_account = Account.objects.get(user=user, account_name__iexact=note.ledger_type)
+            account_id=matched_account.zoho_account_id
+            
             line_item_payload = {
                 "name": item.item_name,
                 "rate": float(item.amount),
-                "quantity": float(match.group())
+                "quantity": float(match.group()),
+                "account_id":account_id
             }
 
             if tax_id:
@@ -878,12 +892,15 @@ def push_debit_notes_to_zoho(user):
                     tax_id = zoho_tax.zoho_tax_id
                 except ZohoTax.DoesNotExist:
                     print(f"[WARNING] No ZohoTax found for GST rate {gst_rate} for item '{item_name_to_use}'")
+            matched_account = Account.objects.get(user=user, account_name__iexact=note.ledger_type)
+            account_id=matched_account.zoho_account_id
 
             line_item_payload = {
                 "name": item_name_to_use,
                 "rate": float(item.amount)/ float(match.group()),
                 "quantity": float(match.group()),
-                "item_id":matched_item.zoho_item_id
+                "item_id":matched_item.zoho_item_id,
+                "account_id":account_id
             }
 
             if tax_id:
@@ -1523,6 +1540,12 @@ def push_customers_to_zoho(user):
             print(f"[Skipped] {contact_name} already exists in Zoho Books.")
             continue
 
+        # Convert opening balance safely
+        try:
+            opening_balance_value = abs(float(ledger.opening_balance))
+        except (ValueError, TypeError):
+            opening_balance_value = 0.0
+
         data = {
             "contact_name": contact_name,
             "company_name": contact_name,
@@ -1541,6 +1564,12 @@ def push_customers_to_zoho(user):
                     "phone": ledger.ledger_mobile or ""
                 }
             ],
+                "opening_balances": [
+        {
+            # "location_id": DEFAULT_LOCATION_ID,
+            "exchange_rate": 1,
+            "opening_balance_amount": opening_balance_value
+        }]
             # Optional fields you can add if available:
             # "website": ledger.website or "",
             # "gst_treatment": "business_gst" or "consumer",  # depends on country
@@ -1664,6 +1693,109 @@ def push_accounts_to_zoho(user):
         else:
             print(f"[Error] Failed to create or locate {account.account_name} →", response_data)
 
+import requests
+
+# Your mapping from Tally account types to Zoho account types
+TALLY_TO_ZOHO_ACCOUNT_TYPE = {
+    "Bank Accounts": "bank",
+    "Bank OCC A/c": "bank",
+    "Bank OD A/c": "bank",
+    "Branch / Divisions": "other_liability",
+    "Capital Account": "equity",
+    "Cash-in-Hand": "cash",
+    "Current Assets": "other_current_asset",
+    "Current Liabilities": "other_current_liability",
+    "Deposits (Asset)": "other_current_asset",
+    "Direct Expenses": "expense",
+    "Direct Incomes": "income",
+    "Duties & Taxes": "other_current_asset",
+    "Expenses (Direct)": "expense",
+    "Expenses (Indirect)": "other_expense",
+    "Fixed Assets": "fixed_asset",
+    "Income (Direct)": "income",
+    "Income (Indirect)": "other_income",
+    "Indirect Expenses": "other_expense",
+    "Indirect Incomes": "other_income",
+    "Investments": "other_current_asset",
+    "Loans & Advances (Asset)": "other_current_asset",
+    "Loans (Liability)": "long_term_liability",
+    "Misc. Expenses (ASSET)": "other_asset",
+    "Provisions": "other_current_liability",
+    "Purchase Accounts": "cost_of_goods_sold",
+    "Reserves & Surplus": "equity",
+    "Retained Earnings": "income",
+    "Sales Accounts": "income",
+    "Secured Loans": "other_liability",
+    "Stock-in-Hand": "cost_of_goods_sold",
+    "Suspense A/c": "other_liability",
+    "Unsecured Loans": "loans_and_borrowing",
+}
+
+def get_zoho_account_type(tally_type):
+    # Default fallback if type not found
+    return TALLY_TO_ZOHO_ACCOUNT_TYPE.get(tally_type, "other_current_asset")
+
+def determine_debit_or_credit(zoho_account_type):
+    debit_types = [
+        "asset", "bank", "cash", "expense", "cost_of_goods_sold",
+        "other_current_asset", "other_asset", "fixed_asset"
+    ]
+    if zoho_account_type in debit_types:
+        return "debit"
+    else:
+        return "credit"
+
+def push_opening_balances_to_zoho(user, opening_date="2024-04-01"):
+    from .models import Account
+    access_token, org_id = get_valid_zoho_access_token(user)
+
+    # Filter accounts that were pushed and have an opening balance > 0
+    accounts = Account.objects.filter(
+        user=user,
+        pushed_to_zoho=True,
+        opening_balance__gt=0,
+        zoho_account_id__isnull=False
+    )
+
+    if not accounts.exists():
+        print("No accounts with opening balances to push.")
+        return
+
+    accounts_payload = []
+
+    for account in accounts:
+        zoho_type = get_zoho_account_type(account.account_type)
+        dc_type = determine_debit_or_credit(zoho_type)
+
+        accounts_payload.append({
+
+            "account_id": account.zoho_account_id,
+            "debit_or_credit": dc_type,
+            "amount": float(account.opening_balance),
+            "exchange_rate": 1,
+            # Optional: add "currency_id" or "location_id" if you have those fields
+        })
+
+    payload = {
+        # "date": opening_date,
+        "date": "2025-04-01",
+        "accounts": accounts_payload
+    }
+    print("[Payload to Zoho]:", payload)
+    url = f"https://www.zohoapis.com/books/v3/settings/openingbalances?organization_id={org_id}"
+    headers = {
+        "Authorization": f"Zoho-oauthtoken {access_token}",
+        "Content-Type": "application/json"
+    }
+
+    response = requests.post(url, headers=headers, json=payload)
+    try:
+        result = response.json()
+    except Exception:
+        result = {"error": "Invalid JSON response"}
+
+    print("[Zoho Opening Balance Response]", response.status_code, result)
+
 
 def push_vendors_to_zoho(user):
     from .models import Vendor
@@ -1703,6 +1835,12 @@ def push_vendors_to_zoho(user):
             print(f"[Skipped] Vendor {contact_name} already exists in Zoho Books.")
             continue
 
+        # Convert opening balance safely
+        try:
+            opening_balance_value = abs(float(vendor.opening_balance))
+        except (ValueError, TypeError):
+            opening_balance_value = 0.0
+
         # Prepare vendor data
         data = {
             "contact_type": "vendor",
@@ -1715,7 +1853,13 @@ def push_vendors_to_zoho(user):
                 "zip": vendor.pincode or "",
                 "state": vendor.state_name or "",
                 "country": vendor.country_name or ""
-            }
+            },
+            "opening_balances": [
+        {
+            # "location_id": DEFAULT_LOCATION_ID,
+            "exchange_rate": 1,
+            "opening_balance_amount": opening_balance_value
+        }]
         }
 
         # Push to Zoho Books
@@ -1970,7 +2114,7 @@ def push_invoices_to_zoho(user):
 
             # C: Add item to line_items
             line_items.append({
-                "item_id":"",
+                "item_id":item_master.zoho_item_id,
                 "name": item.item_name,
                 "rate": float(item.amount)/numeric_quantity,
                 "quantity": numeric_quantity,
@@ -2060,12 +2204,15 @@ def push_receipts_to_zoho(user):
         receipt.invoice_zoho_id = invoice_zoho_id
         receipt.invoice_total_amount = invoice_total_amount
         receipt.save(update_fields=["customer_zoho_id", "invoice_zoho_id", "invoice_total_amount"])
-
+        matched_account = Account.objects.get(user=user, account_name__iexact=receipt.payment_mode)
+        print(matched_account)
+        account_id=matched_account.zoho_account_id
         payload = {
             # "customer_id": customer_zoho_id,
             "payment_mode": receipt.payment_mode.lower(),
             "amount": float(invoice_total_amount or receipt.amount),
-            "date": str(receipt.receipt_date)
+            "date": str(receipt.receipt_date),
+            "account_id":account_id
         }
 
         if invoice_zoho_id:
@@ -2157,6 +2304,7 @@ def push_purchases_to_zoho(user):
                 print(f"[ERROR] Invalid quantity '{item.quantity}' for item '{item.item_name}'")
                 continue
             line_items.append({
+                "item_id": item_master.zoho_item_id,
                 "name": item.item_name,
                 "rate": float(item.amount)/quantity,
                 "quantity": quantity,
@@ -2314,20 +2462,21 @@ def push_expenses_to_zoho(user):
 def push_all_to_zoho(request):
     user = request.user
     try:
-        push_taxes_to_zoho(user)
+        # push_taxes_to_zoho(user)
         push_bank_accounts_to_zoho(user)
-        push_customers_to_zoho(user)
-        push_vendors_to_zoho(user)
+        # push_customers_to_zoho(user)
+        # push_vendors_to_zoho(user)
         push_accounts_to_zoho(user)
-        push_items_to_zoho(user)
-        push_invoices_to_zoho(user)
+        push_opening_balances_to_zoho(user)
+        # push_items_to_zoho(user)
+        # push_invoices_to_zoho(user)
         push_receipts_to_zoho(user)
-        push_purchases_to_zoho(user)
-        push_payments_to_zoho(user)
-        push_credit_notes_to_zoho(user)
-        push_debit_notes_to_zoho(user)  
-        push_expenses_to_zoho(user)
-        push_journals_to_zoho(user)
+        # push_purchases_to_zoho(user)
+        # push_payments_to_zoho(user)
+        # push_credit_notes_to_zoho(user)
+        # push_debit_notes_to_zoho(user)  
+        # push_expenses_to_zoho(user)
+        # push_journals_to_zoho(user)
         
         return Response({"message": "Data pushed to Zoho Books successfully."})
     except Exception as e:

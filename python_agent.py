@@ -87,7 +87,7 @@ TALLY_REQUEST_XML_CUSTOMERS = """
           <COLLECTION NAME="Customer Ledgers" ISMODIFY="No">
             <TYPE>Ledger</TYPE>
             <FILTER>IsSundryDebtor</FILTER>
-            <FETCH>NAME, PARENT, EMAIL ,ADDRESS , LEDGERMOBILE, WEBSITE , LEDSTATENAME ,COUNTRYNAME , PINCODE , GSTIN, GSTREGISTRATIONTYPE</FETCH>
+            <FETCH>NAME, PARENT, EMAIL ,ADDRESS , LEDGERMOBILE, WEBSITE , LEDSTATENAME ,COUNTRYNAME , PINCODE , GSTIN, GSTREGISTRATIONTYPE , OPENINGBALANCE</FETCH>
           </COLLECTION>
           <SYSTEM TYPE="Formulae" NAME="IsSundryDebtor">
              $Parent = "Sundry Debtors"
@@ -117,7 +117,7 @@ TALLY_REQUEST_XML_VENDORS = """
           <COLLECTION NAME="Vendor Ledgers" ISMODIFY="No">
             <TYPE>Ledger</TYPE>
             <FILTER>IsSundryCreditor</FILTER>
-            <FETCH>NAME, PARENT, EMAIL ,ADDRESS , LEDGERMOBILE, WEBSITE , LEDSTATENAME ,COUNTRYNAME , PINCODE</FETCH>
+            <FETCH>NAME, PARENT, EMAIL ,ADDRESS , LEDGERMOBILE, WEBSITE , LEDSTATENAME ,COUNTRYNAME , PINCODE , OPENINGBALANCE </FETCH>
           </COLLECTION>
           <SYSTEM TYPE="Formulae" NAME="IsSundryCreditor">
              $Parent = "Sundry Creditors"
@@ -146,7 +146,7 @@ TALLY_REQUEST_XML_COA = """
         <TDLMESSAGE>
           <COLLECTION NAME="All Ledgers" ISMODIFY="No">
             <TYPE>Ledger</TYPE>
-            <FETCH>NAME, PARENT</FETCH>
+            <FETCH>NAME, PARENT , OPENINGBALANCE </FETCH>
           </COLLECTION>
         </TDLMESSAGE>
       </TDL>
@@ -260,8 +260,8 @@ def get_sales_voucher_xml(from_date, to_date):
           <STATICVARIABLES>
             <SVEXPORTFORMAT>$$SysName:XML</SVEXPORTFORMAT>
             <EXPLODEFLAG>Yes</EXPLODEFLAG>
-            <SVFROMDATE>{from_date}</SVFROMDATE>
-            <SVTODATE>{to_date}</SVTODATE>
+            <SVFROMDATE>20250401</SVFROMDATE>
+            <SVTODATE>20260331</SVTODATE>
           </STATICVARIABLES>
           <TDL>
             <TDLMESSAGE>
@@ -271,7 +271,10 @@ def get_sales_voucher_xml(from_date, to_date):
                 <FETCH>DATE, VOUCHERNUMBER, LEDGERENTRIES.LIST, ALLINVENTORYENTRIES.LIST</FETCH>
               </COLLECTION>
               <SYSTEM TYPE="Formulae" NAME="IsSales">
-                $VoucherTypeName = "Sales"
+                $VoucherTypeName = "Sales "
+              </SYSTEM>
+              <SYSTEM TYPE="Formulae" NAME="DateFilter">
+                $$Date >= DATE "20250401" AND $$Date <= DATE "20260331"
               </SYSTEM>
             </TDLMESSAGE>
           </TDL>
@@ -307,6 +310,9 @@ def get_receipt_voucher_xml(from_date, to_date):
               <SYSTEM TYPE="Formulae" NAME="IsReceipt">
                 $VoucherTypeName = "Receipt"
               </SYSTEM>
+                <SYSTEM TYPE="Formulae" NAME="DateFilter">
+                $$Date >= DATE "{from_date}" AND $$Date <= DATE "{to_date}"
+              </SYSTEM>
             </TDLMESSAGE>
           </TDL>
         </DESC>
@@ -339,6 +345,9 @@ def get_payment_voucher_xml(from_date, to_date):
               </COLLECTION>
               <SYSTEM TYPE="Formulae" NAME="IsPayment">
                 $VoucherTypeName = "Payment"
+              </SYSTEM>
+                <SYSTEM TYPE="Formulae" NAME="DateFilter">
+                $$Date >= DATE "{from_date}" AND $$Date <= DATE "{to_date}"
               </SYSTEM>
             </TDLMESSAGE>
           </TDL>
@@ -460,6 +469,9 @@ def get_expenses_voucher_xml(from_date, to_date):
               <SYSTEM TYPE="Formulae" NAME="IsPayment">
                 $VoucherTypeName = "Payment"
               </SYSTEM>
+                <SYSTEM TYPE="Formulae" NAME="DateFilter">
+                $$Date >= DATE "{from_date}" AND $$Date <= DATE "{to_date}"
+              </SYSTEM>
             </TDLMESSAGE>
           </TDL>
         </DESC>
@@ -580,6 +592,9 @@ def get_journal_voucher_xml(from_date, to_date):
               <SYSTEM TYPE="Formulae" NAME="IsJournal">
                 $VoucherTypeName = "Journal"
               </SYSTEM>
+                <SYSTEM TYPE="Formulae" NAME="DateFilter">
+                $$Date >= DATE "{from_date}" AND $$Date <= DATE "{to_date}"
+              </SYSTEM>
             </TDLMESSAGE>
           </TDL>
         </DESC>
@@ -679,12 +694,88 @@ def get_credit_note_xml(from_date, to_date):
               <SYSTEM TYPE="Formulae" NAME="IsCreditNote">
                 $VoucherTypeName = "Credit Note"
               </SYSTEM>
+                <SYSTEM TYPE="Formulae" NAME="DateFilter">
+                $$Date >= DATE "{from_date}" AND $$Date <= DATE "{to_date}"
+              </SYSTEM>
             </TDLMESSAGE>
           </TDL>
         </DESC>
       </BODY>
     </ENVELOPE>
     """
+
+# def parse_credit_or_debit_vouchers(xml_data, voucher_type='credit'):
+#     invoices = defaultdict(lambda: {
+#         "customer_name": "",
+#         "note_number": "",
+#         "note_date": "",
+#         "items": [],
+#         "cgst": 0.0,
+#         "sgst": 0.0,
+#         "total_amount": 0.0,
+#         "type": voucher_type
+#     })
+
+#     xml_data = clean_xml(xml_data)
+#     print(xml_data)
+#     root = ET.fromstring(xml_data)
+
+#     for voucher in root.findall(".//VOUCHER"):
+#         inv_no = voucher.findtext("VOUCHERNUMBER", default="Unknown")
+#         ledger_entry = voucher.find(".//LEDGERENTRIES.LIST")
+#         customer = ledger_entry.findtext(".//LEDGERNAME", default="Unknown") if ledger_entry is not None else "Unknown"
+#         date_raw = voucher.findtext("DATE", default="")
+#         date = f"{date_raw[0:4]}-{date_raw[4:6]}-{date_raw[6:8]}" if len(date_raw) == 8 else date_raw
+
+#         key = (inv_no, customer, date)
+
+#         invoice = invoices[key]
+#         invoice["customer_name"] = customer
+#         invoice["note_number"] = inv_no
+#         invoice["note_date"] = date
+
+#         for item in voucher.findall(".//ALLINVENTORYENTRIES.LIST"):
+#             item_name = item.findtext("STOCKITEMNAME", default="")
+#             qty = item.findtext("ACTUALQTY", default="")
+#             amt = float(item.findtext("AMOUNT", default="0.0"))
+#             amt_abs = abs(amt)
+
+#             invoice["items"].append({
+#                 "item_name": item_name,
+#                 "quantity": qty.strip(),
+#                 "amount": f"{amt_abs:.2f}"
+#             })
+#             invoice["total_amount"] += amt_abs
+
+#         for ledger in voucher.findall(".//LEDGERENTRIES.LIST"):
+#             ledger_name = ledger.findtext("LEDGERNAME", "").lower()
+#             amt_abs = float(ledger.findtext("AMOUNT", default="0.0"))
+
+#             if "cgst" in ledger_name:
+#                 invoice["cgst"] += abs(amt_abs)
+#             elif "sgst" in ledger_name:
+#                 invoice["sgst"] += abs(amt_abs)
+
+#             bill_allocation = ledger.find(".//BILLALLOCATIONS.LIST")
+#             if bill_allocation is not None:
+#                 against_ref = bill_allocation.findtext("NAME", default="")  # This is often the reference number
+#             if against_ref:
+#                 invoice["against_ref"] = against_ref
+#     return [
+#         {
+#             **inv,
+#             "cgst": f"{inv['cgst']:.2f}",
+#             "sgst": f"{inv['sgst']:.2f}",
+#             "total_amount": f"{(inv['total_amount'] + inv['cgst'] + inv['sgst']):.2f}",
+#             "against_ref": inv.get("against_ref", "")
+#         }
+#         for inv in invoices.values()
+#     ]
+import xml.etree.ElementTree as ET
+from collections import defaultdict
+
+def clean_xml(xml_str):
+    return xml_str.replace('&', '&amp;')  # minimal XML sanitizer
 
 def parse_credit_or_debit_vouchers(xml_data, voucher_type='credit'):
     invoices = defaultdict(lambda: {
@@ -695,7 +786,9 @@ def parse_credit_or_debit_vouchers(xml_data, voucher_type='credit'):
         "cgst": 0.0,
         "sgst": 0.0,
         "total_amount": 0.0,
-        "type": voucher_type
+        "type": voucher_type,
+        "ledger_type": "",
+        "against_ref": ""
     })
 
     xml_data = clean_xml(xml_data)
@@ -715,6 +808,14 @@ def parse_credit_or_debit_vouchers(xml_data, voucher_type='credit'):
         invoice["note_number"] = inv_no
         invoice["note_date"] = date
 
+        # Get ledger type from ACCOUNTINGALLOCATIONS.LIST
+        acc_alloc = voucher.find(".//ACCOUNTINGALLOCATIONS.LIST")
+        if acc_alloc is not None:
+            ledger_name = acc_alloc.findtext("LEDGERNAME", default="").strip()
+            if ledger_name:
+                invoice["ledger_type"] = ledger_name  # only one ledger_type as requested
+
+        # Handle inventory entries
         for item in voucher.findall(".//ALLINVENTORYENTRIES.LIST"):
             item_name = item.findtext("STOCKITEMNAME", default="")
             qty = item.findtext("ACTUALQTY", default="")
@@ -728,27 +829,28 @@ def parse_credit_or_debit_vouchers(xml_data, voucher_type='credit'):
             })
             invoice["total_amount"] += amt_abs
 
+        # Handle taxes and reference
         for ledger in voucher.findall(".//LEDGERENTRIES.LIST"):
-            ledger_name = ledger.findtext("LEDGERNAME", "").lower()
-            amt_abs = float(ledger.findtext("AMOUNT", default="0.0"))
+            ledger_name_lower = ledger.findtext("LEDGERNAME", "").lower()
+            amt = float(ledger.findtext("AMOUNT", default="0.0"))
 
-            if "cgst" in ledger_name:
-                invoice["cgst"] += abs(amt_abs)
-            elif "sgst" in ledger_name:
-                invoice["sgst"] += abs(amt_abs)
+            if "cgst" in ledger_name_lower:
+                invoice["cgst"] += abs(amt)
+            elif "sgst" in ledger_name_lower:
+                invoice["sgst"] += abs(amt)
 
             bill_allocation = ledger.find(".//BILLALLOCATIONS.LIST")
             if bill_allocation is not None:
-                against_ref = bill_allocation.findtext("NAME", default="")  # This is often the reference number
-            if against_ref:
-                invoice["against_ref"] = against_ref
+                against_ref = bill_allocation.findtext("NAME", default="")
+                if against_ref:
+                    invoice["against_ref"] = against_ref
+
     return [
         {
             **inv,
             "cgst": f"{inv['cgst']:.2f}",
             "sgst": f"{inv['sgst']:.2f}",
             "total_amount": f"{(inv['total_amount'] + inv['cgst'] + inv['sgst']):.2f}",
-            "against_ref": inv.get("against_ref", "")
         }
         for inv in invoices.values()
     ]
@@ -849,6 +951,9 @@ def get_debit_note_xml(from_date, to_date):
               <SYSTEM TYPE="Formulae" NAME="IsDebitNote">
                 $VoucherTypeName = "Debit Note"
               </SYSTEM>
+              <SYSTEM TYPE="Formulae" NAME="DateFilter">
+                $$Date >= DATE "{from_date}" AND $$Date <= DATE "{to_date}"
+              </SYSTEM>
             </TDLMESSAGE>
           </TDL>
         </DESC>
@@ -878,7 +983,7 @@ TALLY_REQUEST_XML_BANK_ACCOUNTS = """
             <FETCH>
               NAME, PARENT, EMAIL, ADDRESS, LEDGERMOBILE, WEBSITE, LEDSTATENAME, COUNTRYNAME, PINCODE,
               BANKALLOCATIONS.BANKNAME, BANKALLOCATIONS.BRANCHNAME, BANKALLOCATIONS.IFSCODE,
-              BANKALLOCATIONS.ACCOUNTNUMBER, BANKALLOCATIONS.BSRCODE
+              BANKALLOCATIONS.ACCOUNTNUMBER, BANKALLOCATIONS.BSRCODE , OPENINGBALANCE
             </FETCH>
           </COLLECTION>
           <SYSTEM TYPE="Formulae" NAME="IsBankAccount">
@@ -909,11 +1014,16 @@ def parse_bank_ledgers(xml_data):
             state_name = ledger.findtext("LEDSTATENAME", default="")
             country_name = ledger.findtext("COUNTRYNAME", default="")
             pincode = ledger.findtext("PINCODE", default="")
-
+            opening_balance_raw = ledger.findtext("OPENINGBALANCE", default="0")
+            try:
+              opening_balance = str(abs(float(opening_balance_raw)))
+            except ValueError:
+              opening_balance = "0"
             # Address can have multiple lines
             address_elems = ledger.findall(".//ADDRESS")
             address_lines = [elem.text.strip() for elem in address_elems if elem.text]
             address = ", ".join(address_lines)
+
 
             # Handle BANKALLOCATIONS safely
             bank_alloc = ledger.find(".//BANKALLOCATIONS.LIST")
@@ -940,7 +1050,8 @@ def parse_bank_ledgers(xml_data):
                 "branch_name": branch_name,
                 "ifsc_code": ifsc_code,
                 "account_number": account_number,
-                "bsr_code": bsr_code
+                "bsr_code": bsr_code,
+                "opening_balance": opening_balance
             })
 
         return banks
@@ -1058,6 +1169,9 @@ def get_purchase_voucher_xml(from_date, to_date):
               </COLLECTION>
               <SYSTEM TYPE="Formulae" NAME="IsPurchase">
                 $VoucherTypeName = "Purchase"
+              </SYSTEM>
+                <SYSTEM TYPE="Formulae" NAME="DateFilter">
+                $$Date >= DATE "{from_date}" AND $$Date <= DATE "{to_date}"
               </SYSTEM>
             </TDLMESSAGE>
           </TDL>
@@ -1332,7 +1446,6 @@ def parse_ledgers(xml_data, ledger_type="customer"):
     ledgers = []
     try:
         xml_data = clean_xml(xml_data)
-        print(xml_data)
         root = ET.fromstring(xml_data)
 
         for ledger in root.findall(".//LEDGER"):
@@ -1346,6 +1459,12 @@ def parse_ledgers(xml_data, ledger_type="customer"):
             pincode = ledger.findtext("PINCODE", default="")
             gstin = ledger.findtext("GSTIN", default="")
             gst_reg_type = ledger.findtext("GSTREGISTRATIONTYPE", default="")
+            opening_balance_raw = ledger.findtext("OPENINGBALANCE", default="0")
+            try:
+              opening_balance = str(abs(float(opening_balance_raw)))
+            except ValueError:
+              opening_balance = "0"
+
 
 
             address_elems = ledger.findall(".//ADDRESS")
@@ -1364,7 +1483,8 @@ def parse_ledgers(xml_data, ledger_type="customer"):
                     "country_name": country_name,
                     "pincode": pincode,
                     "gstin": gstin,
-                    "gst_registration_type": gst_reg_type
+                    "gst_registration_type": gst_reg_type,
+                    "opening_balance": opening_balance
                 })
             elif ledger_type == "vendor" and parent.strip().lower() == "sundry creditors":
                 ledgers.append({
@@ -1378,7 +1498,8 @@ def parse_ledgers(xml_data, ledger_type="customer"):
                     "country_name": country_name,
                     "pincode": pincode,
                     "gstin": gstin,
-                    "gst_registration_type": gst_reg_type
+                    "gst_registration_type": gst_reg_type,
+                    "opening_balance": opening_balance
                 })
 
         return ledgers
@@ -1397,6 +1518,11 @@ def parse_coa_ledgers(xml_data):
         root = ET.fromstring(xml_data)
 
         for ledger in root.findall(".//LEDGER"):
+            opening_balance_raw = ledger.findtext("OPENINGBALANCE", default="0")
+            try:
+              opening_balance = str(abs(float(opening_balance_raw)))
+            except ValueError:
+              opening_balance = "0"
             name = ledger.findtext(".//NAME", default="Unknown")
             parent = ledger.findtext("PARENT", default="Unknown")
             account_type = TALLY_TO_ZOHO_ACCOUNT_TYPE.get(parent)
@@ -1405,6 +1531,7 @@ def parse_coa_ledgers(xml_data):
                 "account_name": name,
                 "account_code": name,  # assuming Tally name is code for now
                 "account_type": account_type,
+                "opening_balance": opening_balance
             })
 
         return accounts
@@ -1671,13 +1798,31 @@ def send_coa_to_django(accounts):
     
 def send_items_to_django(items):
     try:
+        valid_items = []
+        for item in items:
+            # Corrected validation for the 'name' field
+            if (
+                item.get("name") not in [None, "", "Unknown"]
+            ):
+                valid_items.append(item)
+            else:
+                print(f"⚠️ Skipping invalid item: {item}")
+
+        if not valid_items:
+            raise Exception("No valid items to send.")
+
         headers = {"Authorization": f"Token {AUTH_TOKEN}"}
-        response = requests.post("http://127.0.0.1:8000/api/users/items/", json={"items": items}, headers=headers)
+        response = requests.post(
+            "http://127.0.0.1:8000/api/users/items/",
+            json={"items": valid_items},
+            headers=headers
+        )
         response.raise_for_status()
+
     except requests.exceptions.RequestException as e:
         logging.error(f"Error sending items to Django: {e}")
         raise Exception("Failed to send items to server.")
-    
+
 import logging
 
 def send_invoices_to_django(invoices):
@@ -1744,7 +1889,7 @@ def send_receipts_to_django(receipts):
 
 # ---------------- GUI LOGIC ----------------
 
-def sync_data():
+def sync_data(from_date, to_date):
     try:
         status_label.config(text="Connecting to Tally...", fg="blue")
         root.update()
@@ -1763,7 +1908,9 @@ def sync_data():
         # Fetch vendors
         xml_vendors = get_tally_data(TALLY_REQUEST_XML_VENDORS)
         vendors = parse_ledgers(xml_vendors, ledger_type="vendor")
-
+        for item in vendors:
+          print("\nFetched Customer:")
+          print(json.dumps(vendors, indent=2))
         # Chart of Accounts
         xml_coa = get_tally_data(TALLY_REQUEST_XML_COA)
         accounts = parse_coa_ledgers(xml_coa)
@@ -1776,8 +1923,8 @@ def sync_data():
         
         #   print(json.dumps(item, indent=2))
 
-        from_date = from_date_picker.get_date().strftime("%Y%m%d")
-        to_date = to_date_picker.get_date().strftime("%Y%m%d")
+        # from_date = from_date_picker.get_date().strftime("%Y%m%d")
+        # to_date = to_date_picker.get_date().strftime("%Y%m%d")
 
         # Invoices
         xml_sales = get_tally_data(get_sales_voucher_xml(from_date, to_date))
@@ -1791,9 +1938,9 @@ def sync_data():
               # print(f"⚠️ Date formatting failed for invoice: {invoice.get('invoice_number')}, error: {e}")
               invoice["invoice_date"] = None
         
-        # print("\nFetched Invoices:")
-        # for invoice in invoices:
-        #   print(json.dumps(invoice, indent=2))
+        print("\nFetched Invoices:")
+        for invoice in invoices:
+          print(json.dumps(invoice, indent=2))
 
         # if not customers and not vendors:
         #     messagebox.showwarning("No Data", "No customers or vendors found in Tally.")
@@ -1806,11 +1953,11 @@ def sync_data():
         # for receipt in receipts:
         #   print(json.dumps(receipt, indent=2))
 
-        # if banks:
-        #   print("\nFetched Bank Ledgers:")
-        #   for bank in banks:
-        #     print(json.dumps(bank, indent=2))
-        #   send_banks_to_django(banks)
+        if banks:
+          print("\nFetched Bank Ledgers:")
+          for bank in banks:
+            print(json.dumps(bank, indent=2))
+          send_banks_to_django(banks)
 
         # Purchase Vouchers
         xml_purchases = get_tally_data(get_purchase_voucher_xml(from_date, to_date))
@@ -1889,35 +2036,43 @@ def sync_data():
 
 
 # ---------------- GUI SETUP ----------------
+import tkinter as tk
+from tkinter import ttk, messagebox
+import datetime
+import json
 
 root = tk.Tk()
-root.title("Tally to Django Sync Agent")
-root.geometry("400x360")
+root.title("Tally Sync Agent")
+root.geometry("380x350")
 root.resizable(False, False)
 
-title_label = tk.Label(root, text="Tally → Django Sync", font=("Arial", 16, "bold"))
+title_label = tk.Label(root, text="Tally → Books Sync", font=("Arial", 16, "bold"))
 title_label.pack(pady=10)
 
-username_var = tk.StringVar()
-password_var = tk.StringVar()
-
-from_date_picker = DateEntry(root, width=12, background='darkblue',
-                             foreground='white', borderwidth=2, date_pattern='yyyy-mm-dd')
-to_date_picker = DateEntry(root, width=12, background='darkblue',
-                           foreground='white', borderwidth=2, date_pattern='yyyy-mm-dd')
-
-
+# Username input
 tk.Label(root, text="Username").pack()
+username_var = tk.StringVar()
 tk.Entry(root, textvariable=username_var).pack()
 
+# Password input
 tk.Label(root, text="Password").pack()
+password_var = tk.StringVar()
 tk.Entry(root, textvariable=password_var, show="*").pack()
 
-tk.Label(root, text="From Date").pack()
-from_date_picker.pack()
+# Financial Year dropdown
+financial_years = [f"April {year} to March {year+1}" for year in range(2015, 2027)]
+fy_var = tk.StringVar()
+fy_var.set(financial_years[-1])  # default to last FY option
 
-tk.Label(root, text="To Date").pack()
-to_date_picker.pack()
+tk.Label(root, text="Financial Year").pack()
+fy_dropdown = ttk.Combobox(root, textvariable=fy_var, values=financial_years, state="readonly")
+fy_dropdown.pack()
+
+status_label = tk.Label(root, text="", font=("Arial", 10))
+status_label.pack(pady=10)
+
+footer = tk.Label(root, text="v1.0 - Developed by Your Straits Partners", font=("Arial", 8), fg="gray")
+footer.pack(side="bottom", pady=5)
 
 def login_and_sync():
     username = username_var.get()
@@ -1927,20 +2082,27 @@ def login_and_sync():
         messagebox.showwarning("Missing Fields", "Username and password are required.")
         return
 
+    # Assume get_token is your login function; replace with actual implementation
     if not get_token(username, password):
         messagebox.showerror("Login Failed", "Invalid credentials or server error.")
         return
 
-    sync_data()
+    # Parse financial year
+    selected_fy = fy_var.get()  # e.g. "April 2024 to March 2025"
+    parts = selected_fy.split()
+    from_year = int(parts[1])
+    to_year = int(parts[4])
+
+    from_date = datetime.date(from_year, 4, 1).strftime('%Y%m%d')
+    to_date = datetime.date(to_year, 3, 31).strftime('%Y%m%d')
+
+    sync_data(from_date, to_date)
 
 sync_btn = tk.Button(root, text="Login & Sync", command=login_and_sync, font=("Arial", 12), bg="green", fg="white")
 sync_btn.pack(pady=20)
 
 status_label = tk.Label(root, text="", font=("Arial", 10))
 status_label.pack()
-
-footer = tk.Label(root, text="v1.0 - Developed by Your Company", font=("Arial", 8), fg="gray")
-footer.pack(side="bottom", pady=5)
 
 root.mainloop()
 

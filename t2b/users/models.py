@@ -44,6 +44,8 @@ class Ledger(models.Model):
     pincode = models.CharField(max_length=10, null=True, blank=True)
 
     zoho_contact_id = models.CharField(max_length=100, null=True, blank=True)
+    opening_balance = models.DecimalField(max_digits=15, decimal_places=2, default=0)
+
 
     fetched_from_tally = models.BooleanField(default=False)
     pushed_to_zoho = models.BooleanField(default=False)
@@ -73,6 +75,7 @@ class Vendor(models.Model):
     pincode = models.CharField(max_length=10, null=True, blank=True)
 
     zoho_contact_id = models.CharField(max_length=100, null=True, blank=True)
+    opening_balance = models.DecimalField(max_digits=15, decimal_places=2, default=0)
 
     fetched_from_tally = models.BooleanField(default=False)
     pushed_to_zoho = models.BooleanField(default=False)
@@ -92,6 +95,7 @@ class Account(models.Model):
     account_code = models.CharField(max_length=255, unique=True)
     account_type = models.CharField(max_length=255)
     zoho_account_id = models.CharField(max_length=255, blank=True, null=True)
+    opening_balance = models.DecimalField(max_digits=15, decimal_places=2, default=0)
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -292,6 +296,7 @@ class BankAccount(models.Model):
     state_name = models.CharField(max_length=100, blank=True, null=True)
     country_name = models.CharField(max_length=100, blank=True, null=True)
     pincode = models.CharField(max_length=20, blank=True, null=True)
+    opening_balance = models.DecimalField(max_digits=15, decimal_places=2, default=0)
 
     # Bank Details
     bank_name = models.CharField(max_length=255, blank=True, null=True)
@@ -324,6 +329,7 @@ class CreditNote(models.Model):
     zoho_credit_note_id = models.CharField(max_length=255, null=True, blank=True)
     pushed_to_zoho = models.BooleanField(default=False)
     invoice = models.ForeignKey('Invoice', null=True, blank=True, on_delete=models.SET_NULL)  # <-- Add this line
+    ledger_type = models.CharField(max_length=255, blank=True, null=True)
 
     def __str__(self):
         return f"Credit Note {self.note_number} - {self.customer_name}"
@@ -351,6 +357,8 @@ class DebitNote(models.Model):
     fetched_from_tally = models.BooleanField(default=False)
     zoho_debit_note_id = models.CharField(max_length=255, null=True, blank=True)
     pushed_to_zoho = models.BooleanField(default=False)
+    ledger_type = models.CharField(max_length=255, blank=True, null=True)
+
 
     def __str__(self):
         return f"Debit Note {self.note_number} - {self.customer_name}"

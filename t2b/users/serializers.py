@@ -44,7 +44,7 @@ class VendorSerializer(serializers.ModelSerializer):
 class AccountSerializer(serializers.ModelSerializer):
     class Meta:
         model = Account
-        fields = ['user','account_name', 'account_code', 'account_type']
+        fields = ['user','account_name', 'account_code', 'account_type',"opening_balance"]
 
 class ZohoBooksCredentialSerializer(serializers.ModelSerializer):
     class Meta:
@@ -142,7 +142,7 @@ class CreditNoteSerializer(serializers.ModelSerializer):
         model=CreditNote
         fields = [
             'customer_name', 'note_number', 'note_date','against_ref',
-            'cgst', 'sgst', 'total_amount', 'items'
+            'cgst', 'sgst', 'total_amount', 'items','ledger_type',
         ]
 
 class DebitNoteItemSerializer(serializers.ModelSerializer):
@@ -155,7 +155,7 @@ class DebitNoteSerializer(serializers.ModelSerializer):
         model=DebitNote
         fields = [
             'customer_name', 'note_number', 'note_date',"against_ref",
-            'cgst', 'sgst', 'total_amount', 'items'
+            'cgst', 'sgst', 'total_amount', 'items','ledger_type',
         ]
 
 
