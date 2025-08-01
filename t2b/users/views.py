@@ -2744,8 +2744,14 @@ class TotalRecordsView(APIView):
 
         total_sales_voucher = Invoice.objects.filter(user=user).count()
         total_receipts = Receipt.objects.filter(user=user).count()
+        total_purchase = Purchase.objects.filter(user=user).count()
+        total_payments = Payment.objects.filter(user=user).count()
+        total_creditnote = CreditNote.objects.filter(user=user).count()
+        total_debitnote = DebitNote.objects.filter(user=user).count()
+        total_expenses = Expenses.objects.filter(user=user).count()
+        total_journals = Journal.objects.filter(user=user).count()
 
-        total_records_trans = total_sales_voucher + total_receipts 
+        total_records_trans = total_sales_voucher + total_receipts + total_purchase + total_payments + total_creditnote + total_debitnote + total_expenses + total_journals   
 
         return Response({
             "ledgers": total_ledgers,
@@ -2771,6 +2777,12 @@ class DataMigrationStatusView(APIView):
         tally_items = Item.objects.filter(user=user, fetched_from_tally=True).count()
         tally_invoices=Invoice.objects.filter(user=user,fetched_from_tally=True).count()
         tally_receipts=Receipt.objects.filter(user=user,fetched_from_tally=True).count()
+        tally_purchase = Purchase.objects.filter(user=user,fetched_from_tally=True).count()
+        tally_payments = Payment.objects.filter(user=user,fetched_from_tally=True).count()
+        tally_creditnote = CreditNote.objects.filter(user=user,fetched_from_tally=True).count()
+        tally_debitnote = DebitNote.objects.filter(user=user,fetched_from_tally=True).count()
+        tally_expenses = Expenses.objects.filter(user=user,fetched_from_tally=True).count()
+        tally_journals = Journal.objects.filter(user=user,fetched_from_tally=True).count()
 
         # Totals for pushed to Zoho
         zoho_ledgers = Ledger.objects.filter(user=user, pushed_to_zoho=True).count()
@@ -2779,6 +2791,12 @@ class DataMigrationStatusView(APIView):
         zoho_items = Item.objects.filter(user=user, pushed_to_zoho=True).count()
         zoho_invoices=Invoice.objects.filter(user=user,pushed_to_zoho=True).count()
         zoho_receipts=Receipt.objects.filter(user=user,pushed_to_zoho=True).count()
+        zoho_purchase = Purchase.objects.filter(user=user,pushed_to_zoho=True).count()
+        zoho_payments = Payment.objects.filter(user=user,pushed_to_zoho=True).count()
+        zoho_creditnote = CreditNote.objects.filter(user=user,pushed_to_zoho=True).count()
+        zoho_debitnote = DebitNote.objects.filter(user=user,pushed_to_zoho=True).count()
+        zoho_expenses = Expenses.objects.filter(user=user,pushed_to_zoho=True).count()
+        zoho_journals = Journal.objects.filter(user=user,pushed_to_zoho=True).count()
 
         # Pending Zoho Migration
         pending_ledgers = Ledger.objects.filter(user=user, pushed_to_zoho=False).count()
@@ -2787,17 +2805,29 @@ class DataMigrationStatusView(APIView):
         pending_items = Item.objects.filter(user=user, pushed_to_zoho=False).count()
         pending_invoices=Invoice.objects.filter(user=user,pushed_to_zoho=False).count()
         pending_receipts=Receipt.objects.filter(user=user,pushed_to_zoho=False).count()
-
+        pending_purchase = Purchase.objects.filter(user=user,pushed_to_zoho=False).count()
+        pending_payments = Payment.objects.filter(user=user,pushed_to_zoho=False).count()
+        pending_creditnote = CreditNote.objects.filter(user=user,pushed_to_zoho=False).count()
+        pending_debitnote = DebitNote.objects.filter(user=user,pushed_to_zoho=False).count()
+        pending_expenses = Expenses.objects.filter(user=user,pushed_to_zoho=False).count()
+        pending_journals = Journal.objects.filter(user=user,pushed_to_zoho=False).count()
+        
         return Response({
-            "fetched_from_tally": tally_ledgers + tally_vendors + tally_accounts + tally_items + tally_invoices + tally_receipts ,
-            "migrated_to_zoho": zoho_ledgers + zoho_vendors + zoho_accounts + zoho_items + zoho_invoices + zoho_receipts,
-            "pending_migration_to_zoho": pending_ledgers + pending_vendors + pending_accounts + pending_items + pending_invoices + pending_receipts ,
+            "fetched_from_tally": tally_ledgers + tally_vendors + tally_accounts + tally_items + tally_invoices + tally_receipts + tally_purchase + tally_payments + tally_creditnote + tally_debitnote + tally_expenses + tally_journals ,
+            "migrated_to_zoho": zoho_ledgers + zoho_vendors + zoho_accounts + zoho_items + zoho_invoices + zoho_receipts + zoho_purchase + zoho_payments +zoho_creditnote + zoho_debitnote + zoho_expenses + zoho_journals,
+            "pending_migration_to_zoho": pending_ledgers + pending_vendors + pending_accounts + pending_items + pending_invoices + pending_receipts + pending_purchase + pending_payments + pending_creditnote + pending_debitnote + pending_expenses + pending_journals,
             "customers":zoho_ledgers,
             "vendors":zoho_vendors,
             "COA":zoho_accounts,
             "items":zoho_items,
             "invoices":zoho_invoices,
-            "receipts":zoho_receipts
+            "receipts":zoho_receipts,
+            "purchase":zoho_purchase,
+            "payments":zoho_payments,
+            "creditnote":zoho_creditnote,
+            "debitnote":zoho_debitnote,
+            "journal":zoho_journals,
+            "expenses":zoho_expenses,
         })
 
 class CustomersDashboard(APIView):
@@ -3136,4 +3166,15 @@ class DebitNoteDashboard(APIView):
                 "pending_to_push_to_zoho": pending_to_push_count
             },
             "all_debit_notes": all_notes
+        })
+
+
+class UserInfoView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        user = request.user
+        return Response({
+            'username': user.username,
+            'email': user.email
         })

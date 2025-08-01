@@ -44,6 +44,8 @@ urlpatterns = [
       path('purchasesdashboard/', PurchaseDashboard.as_view(), name='purchase-summary'),
     path('creditnotesdashboard/', CreditNoteDashboard.as_view(), name='creditnote-summary'),
     path('debitnotesdashboard/', DebitNoteDashboard.as_view(), name='debitnote-summary'),
+
+    path('user-info/', UserInfoView.as_view(), name='user-info'),
      
 
 ]
