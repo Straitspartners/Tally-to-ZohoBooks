@@ -32,6 +32,8 @@ class Ledger(models.Model):
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, null=True)
     name = models.CharField(max_length=255)
     parent = models.CharField(max_length=255, blank=True, null=True)
+
+    gst_no = models.CharField(max_length=255, blank=True, null=True)
     
     email = models.EmailField(null=True, blank=True)
     address = models.TextField(blank=True, null=True)
@@ -67,6 +69,8 @@ class Vendor(models.Model):
     
     email = models.EmailField(null=True, blank=True)
     address = models.TextField(blank=True, null=True)
+
+    gst_no = models.CharField(max_length=255, blank=True, null=True)
     
     ledger_mobile = models.CharField(max_length=20, null=True, blank=True)
     website = models.URLField(null=True, blank=True)
@@ -99,6 +103,8 @@ class Account(models.Model):
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+
+    from_date = models.DateField(null=True, blank=True)  
 
     fetched_from_tally = models.BooleanField(default=False)
     pushed_to_zoho = models.BooleanField(default=False)

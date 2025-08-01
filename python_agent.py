@@ -87,7 +87,7 @@ TALLY_REQUEST_XML_CUSTOMERS = """
           <COLLECTION NAME="Customer Ledgers" ISMODIFY="No">
             <TYPE>Ledger</TYPE>
             <FILTER>IsSundryDebtor</FILTER>
-            <FETCH>NAME, PARENT, EMAIL ,ADDRESS , LEDGERMOBILE, WEBSITE , LEDSTATENAME ,COUNTRYNAME , PINCODE , GSTIN, GSTREGISTRATIONTYPE , OPENINGBALANCE</FETCH>
+            <FETCH>NAME, PARENT, EMAIL ,ADDRESS , LEDGERMOBILE, WEBSITE , LEDSTATENAME ,COUNTRYNAME , PINCODE , GSTIN/UIN, GSTREGISTRATIONTYPE , OPENINGBALANCE</FETCH>
           </COLLECTION>
           <SYSTEM TYPE="Formulae" NAME="IsSundryDebtor">
              $Parent = "Sundry Debtors"
@@ -1438,6 +1438,7 @@ def parse_ledgers(xml_data, ledger_type="customer"):
             gstin = ledger.findtext("GSTIN", default="")
             gst_reg_type = ledger.findtext("GSTREGISTRATIONTYPE", default="")
             opening_balance_raw = ledger.findtext("OPENINGBALANCE", default="0")
+            gst_no=ledger.findtext("GSTIN/UIN",default="")
             try:
               opening_balance = str(abs(float(opening_balance_raw)))
             except ValueError:
@@ -1462,7 +1463,8 @@ def parse_ledgers(xml_data, ledger_type="customer"):
                     "pincode": pincode,
                     "gstin": gstin,
                     "gst_registration_type": gst_reg_type,
-                    "opening_balance": opening_balance
+                    "opening_balance": opening_balance,
+                    "gst_no":gst_no
                 })
             elif ledger_type == "vendor" and parent.strip().lower() == "sundry creditors":
                 ledgers.append({
@@ -1477,7 +1479,8 @@ def parse_ledgers(xml_data, ledger_type="customer"):
                     "pincode": pincode,
                     "gstin": gstin,
                     "gst_registration_type": gst_reg_type,
-                    "opening_balance": opening_balance
+                    "opening_balance": opening_balance,
+                    "gst_no":gst_no
                 })
 
         return ledgers
@@ -1488,7 +1491,7 @@ def parse_ledgers(xml_data, ledger_type="customer"):
             file.write(xml_data)
         raise Exception("Failed to parse Tally XML response.")
 
-def parse_coa_ledgers(xml_data):
+def parse_coa_ledgers(xml_data , from_date=None ):
     accounts = []
     try:
         xml_data = clean_xml(xml_data)
@@ -1509,7 +1512,8 @@ def parse_coa_ledgers(xml_data):
                 "account_name": name,
                 "account_code": name,  # assuming Tally name is code for now
                 "account_type": account_type,
-                "opening_balance": opening_balance
+                "opening_balance": opening_balance,
+                "from_date":from_date
             })
 
         return accounts
@@ -1891,7 +1895,7 @@ def sync_data(from_date, to_date):
           print(json.dumps(vendors, indent=2))
         # Chart of Accounts
         xml_coa = get_tally_data(TALLY_REQUEST_XML_COA)
-        accounts = parse_coa_ledgers(xml_coa)
+        accounts = parse_coa_ledgers(xml_coa, from_date=from_date)
 
         # Items
         xml_items = get_tally_data(TALLY_REQUEST_XML_ITEMS)

@@ -17,7 +17,7 @@ class LedgerSerializer(serializers.ModelSerializer):
         'website',
         'state_name',
         'country_name',
-        'pincode']
+        'pincode',"gst_no"]
         
     # Optional: You can add validation for fields here if necessary.
     # def validate_closing_balance(self, value):
@@ -34,7 +34,7 @@ class LedgerSerializer(serializers.ModelSerializer):
 class VendorSerializer(serializers.ModelSerializer):
     class Meta:
         model = Vendor
-        fields = ['id', 'user', 'name', 'parent', 'email', 'address', 'ledger_mobile', 'website', 'state_name', 'country_name', 'pincode']
+        fields = ['id', 'user', 'name', 'parent', 'email', 'address', 'ledger_mobile', 'website', 'state_name', 'country_name', 'pincode',"gst_no"]
     
     def validate_name(self, value):
         if not value:
@@ -44,7 +44,7 @@ class VendorSerializer(serializers.ModelSerializer):
 class AccountSerializer(serializers.ModelSerializer):
     class Meta:
         model = Account
-        fields = ['user','account_name', 'account_code', 'account_type',"opening_balance"]
+        fields = ['user','account_name', 'account_code', 'account_type',"opening_balance","from_date"]
 
 class ZohoBooksCredentialSerializer(serializers.ModelSerializer):
     class Meta:

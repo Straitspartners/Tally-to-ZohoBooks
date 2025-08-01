@@ -16,6 +16,8 @@ from rest_framework.response import Response
 from .models import Account
 from .serializers import AccountSerializer
 from .utils import get_valid_zoho_access_token
+import datetime
+
 
 class BankAccountSyncView(APIView):
     permission_classes = [permissions.IsAuthenticated]
@@ -450,6 +452,58 @@ def sync_vendors(request):
 
 
 
+# class AccountSyncView(APIView):
+#     permission_classes = [permissions.IsAuthenticated]
+
+#     def post(self, request):
+#         accounts_data = request.data.get("accounts", [])
+#         created = []
+#         errors = []
+
+#         for account_data in accounts_data:
+#             serializer = AccountSerializer(data=account_data)
+
+#             if serializer.is_valid():
+#                 account_name = account_data.get("account_name")
+#                 if not account_name:
+#                     errors.append({"error": "Missing account_name in data", "data": account_data})
+#                     continue
+
+#                 # Check for existing account with account_code
+#                 try:
+#                     account_obj = Account.objects.get(user=request.user, account_name=account_name)
+#                     # Update only if not yet fetched from tally
+#                     if not account_obj.fetched_from_tally:
+#                         # Update fields with validated data
+#                         for attr, value in serializer.validated_data.items():
+#                             setattr(account_obj, attr, value)
+#                         account_obj.fetched_from_tally = True
+#                         account_obj.save()
+#                         created.append(account_obj.account_code)
+#                     else:
+#                         # Already fetched, skip update
+#                         pass
+#                 except Account.DoesNotExist:
+#                     # Create new if not exists
+#                     account_obj = Account.objects.create(
+#                         user=request.user,
+#                         account_name=serializer.validated_data.get("account_name", ""),
+#                         account_code=serializer.validated_data.get("account_code", ""),
+#                         account_type=serializer.validated_data.get("account_type", ""),
+#                         zoho_account_id=serializer.validated_data.get("zoho_account_id", ""),
+#                         opening_balance=serializer.validated_data.get("opening_balance",0), 
+#                         fetched_from_tally=True
+#                     )
+#                     created.append(account_obj.account_code)
+#             else:
+#                 errors.append(serializer.errors)
+
+#         return Response({
+#             "created": created,
+#             "errors": errors
+#         }, status=status.HTTP_201_CREATED if not errors else status.HTTP_207_MULTI_STATUS)
+
+
 class AccountSyncView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
@@ -463,33 +517,43 @@ class AccountSyncView(APIView):
 
             if serializer.is_valid():
                 account_name = account_data.get("account_name")
+                from_date_str = account_data.get("from_date")
+
                 if not account_name:
                     errors.append({"error": "Missing account_name in data", "data": account_data})
                     continue
 
-                # Check for existing account with account_code
                 try:
                     account_obj = Account.objects.get(user=request.user, account_name=account_name)
-                    # Update only if not yet fetched from tally
+
                     if not account_obj.fetched_from_tally:
-                        # Update fields with validated data
                         for attr, value in serializer.validated_data.items():
                             setattr(account_obj, attr, value)
+
+                        if from_date_str:
+                            try:
+                                account_obj.from_date = datetime.datetime.strptime(from_date_str, "%Y%m%d").date()
+                            except ValueError:
+                                errors.append({"error": "Invalid from_date format", "data": account_data})
+
                         account_obj.fetched_from_tally = True
                         account_obj.save()
                         created.append(account_obj.account_code)
-                    else:
-                        # Already fetched, skip update
-                        pass
                 except Account.DoesNotExist:
-                    # Create new if not exists
+                    try:
+                        from_date = datetime.datetime.strptime(from_date_str, "%Y%m%d").date() if from_date_str else None
+                    except ValueError:
+                        errors.append({"error": "Invalid from_date format", "data": account_data})
+                        from_date = None
+
                     account_obj = Account.objects.create(
                         user=request.user,
                         account_name=serializer.validated_data.get("account_name", ""),
                         account_code=serializer.validated_data.get("account_code", ""),
                         account_type=serializer.validated_data.get("account_type", ""),
                         zoho_account_id=serializer.validated_data.get("zoho_account_id", ""),
-                        opening_balance=serializer.validated_data.get("opening_balance",0), 
+                        opening_balance=serializer.validated_data.get("opening_balance", 0),
+                        from_date=from_date,
                         fetched_from_tally=True
                     )
                     created.append(account_obj.account_code)
@@ -500,7 +564,6 @@ class AccountSyncView(APIView):
             "created": created,
             "errors": errors
         }, status=status.HTTP_201_CREATED if not errors else status.HTTP_207_MULTI_STATUS)
-
 
 
 @api_view(['POST'])
@@ -1548,6 +1611,7 @@ def push_customers_to_zoho(user):
 
         data = {
             "contact_name": contact_name,
+            "gst_no":ledger.gst_no or "",
             "company_name": contact_name,
             "email": email,
             "phone": ledger.ledger_mobile or "",
@@ -1696,39 +1760,73 @@ def push_accounts_to_zoho(user):
 import requests
 
 # Your mapping from Tally account types to Zoho account types
+# TALLY_TO_ZOHO_ACCOUNT_TYPE = {
+#     "Bank Accounts": "bank",
+#     "Bank OCC A/c": "bank",
+#     "Bank OD A/c": "bank",
+#     "Branch / Divisions": "other_liability",
+#     "Capital Account": "equity",
+#     "Cash-in-Hand": "cash",
+#     "Current Assets": "other_current_asset",
+#     "Current Liabilities": "other_current_liability",
+#     "Deposits (Asset)": "other_current_asset",
+#     "Direct Expenses": "expense",
+#     "Direct Incomes": "income",
+#     "Duties & Taxes": "other_current_asset",
+#     "Expenses (Direct)": "expense",
+#     "Expenses (Indirect)": "other_expense",
+#     "Fixed Assets": "fixed_asset",
+#     "Income (Direct)": "income",
+#     "Income (Indirect)": "other_income",
+#     "Indirect Expenses": "other_expense",
+#     "Indirect Incomes": "other_income",
+#     "Investments": "other_current_asset",
+#     "Loans & Advances (Asset)": "other_current_asset",
+#     "Loans (Liability)": "long_term_liability",
+#     "Misc. Expenses (ASSET)": "other_asset",
+#     "Provisions": "other_current_liability",
+#     "Purchase Accounts": "cost_of_goods_sold",
+#     "Reserves & Surplus": "equity",
+#     "Retained Earnings": "income",
+#     "Sales Accounts": "income",
+#     "Secured Loans": "other_liability",
+#     "Stock-in-Hand": "cost_of_goods_sold",
+#     "Suspense A/c": "other_liability",
+#     "Unsecured Loans": "loans_and_borrowing",
+# }
 TALLY_TO_ZOHO_ACCOUNT_TYPE = {
-    "Bank Accounts": "bank",
-    "Bank OCC A/c": "bank",
-    "Bank OD A/c": "bank",
-    "Branch / Divisions": "other_liability",
-    "Capital Account": "equity",
-    "Cash-in-Hand": "cash",
-    "Current Assets": "other_current_asset",
-    "Current Liabilities": "other_current_liability",
-    "Deposits (Asset)": "other_current_asset",
-    "Direct Expenses": "expense",
-    "Direct Incomes": "income",
-    "Duties & Taxes": "other_current_asset",
-    "Expenses (Direct)": "expense",
-    "Expenses (Indirect)": "other_expense",
-    "Fixed Assets": "fixed_asset",
-    "Income (Direct)": "income",
-    "Income (Indirect)": "other_income",
-    "Indirect Expenses": "other_expense",
-    "Indirect Incomes": "other_income",
-    "Investments": "other_current_asset",
-    "Loans & Advances (Asset)": "other_current_asset",
-    "Loans (Liability)": "long_term_liability",
-    "Misc. Expenses (ASSET)": "other_asset",
-    "Provisions": "other_current_liability",
-    "Purchase Accounts": "cost_of_goods_sold",
-    "Reserves & Surplus": "equity",
-    "Retained Earnings": "income",
-    "Sales Accounts": "income",
-    "Secured Loans": "other_liability",
-    "Stock-in-Hand": "cost_of_goods_sold",
-    "Suspense A/c": "other_liability",
-    "Unsecured Loans": "loans_and_borrowing",
+    "bank": "bank",
+    "bank": "bank",
+    "bank": "bank",
+    "other_liability": "other_liability",
+    "equity": "equity",
+    "cash": "cash",
+    "other_current_asset": "other_current_asset",
+    "other_current_liability": "other_current_liability",
+    "other_current_asset": "other_current_asset",
+    "expense": "expense",
+    "income": "income",
+    "other_current_asset": "other_current_asset",
+    "expense": "expense",
+    "other_expense": "other_expense",
+    "fixed_asset": "fixed_asset",
+    "income": "income",
+    "other_income": "other_income",
+    "other_expense": "other_expense",
+    "other_income": "other_income",
+    "other_current_asset": "other_current_asset",
+    "other_current_asset": "other_current_asset",
+    "long_term_liability": "long_term_liability",
+    "other_asset": "other_asset",
+    "other_current_liability": "other_current_liability",
+    "cost_of_goods_sold": "cost_of_goods_sold",
+    "equity": "equity",
+    "income": "income",
+    "income": "income",
+    "other_liability": "other_liability",
+    "cost_of_goods_sold": "cost_of_goods_sold",
+    "other_liability": "other_liability",
+    "loans_and_borrowing": "loans_and_borrowing",
 }
 
 def get_zoho_account_type(tally_type):
@@ -1745,56 +1843,107 @@ def determine_debit_or_credit(zoho_account_type):
     else:
         return "credit"
 
-def push_opening_balances_to_zoho(user, opening_date="2024-04-01"):
+# def push_opening_balances_to_zoho(user, opening_date="2024-04-01"):
+#     from .models import Account
+#     access_token, org_id = get_valid_zoho_access_token(user)
+
+#     # Filter accounts that were pushed and have an opening balance > 0
+#     accounts = Account.objects.filter(
+#         user=user,
+#         pushed_to_zoho=True,
+#         opening_balance__gt=0,
+#         zoho_account_id__isnull=False,
+        
+#     )
+
+#     if not accounts.exists():
+#         print("No accounts with opening balances to push.")
+#         return
+
+#     accounts_payload = []
+
+#     for account in accounts:
+#         zoho_type = get_zoho_account_type(account.account_type)
+#         dc_type = determine_debit_or_credit(zoho_type)
+#         print(f"[DEBUG] Account Type: {account.account_type} | Zoho Type: {zoho_type} | D/C: {dc_type}")
+
+#         accounts_payload.append({
+
+#             "account_id": account.zoho_account_id,
+#             "debit_or_credit": dc_type,
+#             "amount": float(account.opening_balance),
+#             "exchange_rate": 1,
+#             # Optional: add "currency_id" or "location_id" if you have those fields
+#         })
+
+#     payload = {
+#         # "date": opening_date,
+#         "date": "2025-04-01",
+#         "accounts": accounts_payload
+#     }
+#     print("[Payload to Zoho]:", payload)
+#     url = f"https://www.zohoapis.in/books/v3/settings/openingbalances?organization_id={org_id}"
+#     headers = {
+#         "Authorization": f"Zoho-oauthtoken {access_token}",
+#         "Content-Type": "application/json"
+#     }
+
+#     response = requests.put(url, headers=headers, json=payload)
+#     try:
+#         result = response.json()
+#     except Exception:
+#         result = {"error": "Invalid JSON response"}
+
+#     print("[Zoho Opening Balance Response]", response.status_code, result)
+
+def push_opening_balances_to_zoho(user):
     from .models import Account
     access_token, org_id = get_valid_zoho_access_token(user)
 
-    # Filter accounts that were pushed and have an opening balance > 0
     accounts = Account.objects.filter(
         user=user,
         pushed_to_zoho=True,
         opening_balance__gt=0,
-        zoho_account_id__isnull=False
+        zoho_account_id__isnull=False,
+        from_date__isnull=False  # Make sure from_date exists
     )
 
     if not accounts.exists():
         print("No accounts with opening balances to push.")
         return
 
-    accounts_payload = []
-
     for account in accounts:
         zoho_type = get_zoho_account_type(account.account_type)
         dc_type = determine_debit_or_credit(zoho_type)
+        print(f"[DEBUG] Account Type: {account.account_type} | Zoho Type: {zoho_type} | D/C: {dc_type}")
 
-        accounts_payload.append({
-
+        accounts_payload = [{
             "account_id": account.zoho_account_id,
             "debit_or_credit": dc_type,
             "amount": float(account.opening_balance),
             "exchange_rate": 1,
-            # Optional: add "currency_id" or "location_id" if you have those fields
-        })
+        }]
 
-    payload = {
-        # "date": opening_date,
-        "date": "2025-04-01",
-        "accounts": accounts_payload
-    }
-    print("[Payload to Zoho]:", payload)
-    url = f"https://www.zohoapis.in/books/v3/settings/openingbalances?organization_id={org_id}"
-    headers = {
-        "Authorization": f"Zoho-oauthtoken {access_token}",
-        "Content-Type": "application/json"
-    }
+        payload = {
+            "date": account.from_date.strftime("%Y-%m-%d"),
+            "accounts": accounts_payload
+        }
+        print("[Payload to Zoho]:", payload)
 
-    response = requests.post(url, headers=headers, json=payload)
-    try:
-        result = response.json()
-    except Exception:
-        result = {"error": "Invalid JSON response"}
+        url = f"https://www.zohoapis.in/books/v3/settings/openingbalances?organization_id={org_id}"
+        headers = {
+            "Authorization": f"Zoho-oauthtoken {access_token}",
+            "Content-Type": "application/json"
+        }
 
-    print("[Zoho Opening Balance Response]", response.status_code, result)
+        response = requests.put(url, headers=headers, json=payload)
+        try:
+            result = response.json()
+        except Exception:
+            result = {"error": "Invalid JSON response"}
+
+        print(f"[Zoho Opening Balance Response for {account.account_name}]", response.status_code, result)
+
 
 
 def push_vendors_to_zoho(user):
@@ -1845,6 +1994,7 @@ def push_vendors_to_zoho(user):
         data = {
             "contact_type": "vendor",
             "contact_name": contact_name,
+            "gst_no": vendor.gst_no or "",
             "vendor_name": contact_name,
             "email": email,
             "phone": vendor.ledger_mobile or "",
@@ -2375,7 +2525,8 @@ def push_payments_to_zoho(user):
             "amount": float(payment.amount),
             "date": str(payment.payment_date),
             # "description": f"Payment for invoice {invoice.invoice_number if invoice else 'N/A'}",
-            "account_id": account_id
+            # "account_id": account_id,
+            "paid_through_account_id":account_id
         }
 
         if purchase and purchase.zoho_bill_id:
@@ -2421,9 +2572,12 @@ def push_expenses_to_zoho(user):
             account = Account.objects.get(user=user, account_name=expense.vendor)
             account_id = account.zoho_account_id
             print(account_id)
-            if not account_id:
-                print(f"[ERROR] Missing zoho_account_id for Account: '{account.account_name}'")
-                continue
+            account_mode = Account.objects.get(user=user, account_name=expense.payment_mode)
+            paid_mode_id=account_mode.zoho_account_id
+            print(account_mode)
+            # if not account_id:
+            #     print(f"[ERROR] Missing zoho_account_id for Account: '{account.account_name}'")
+            #     continue
         except Account.DoesNotExist:
             print(f"[ERROR] No Account found for payment_mode: '{expense.payment_mode}'")
             continue
@@ -2434,6 +2588,7 @@ def push_expenses_to_zoho(user):
             "amount": float(expense.amount),
             "date": str(expense.payment_date),
             "account_id": account_id,
+             "paid_through_account_id":paid_mode_id
         }
 
         # 🚀 Send to Zoho
@@ -2466,13 +2621,13 @@ def push_all_to_zoho(request):
         # push_bank_accounts_to_zoho(user)
         # push_customers_to_zoho(user)
         # push_vendors_to_zoho(user)
-        push_accounts_to_zoho(user)
-        push_opening_balances_to_zoho(user)
+        # push_accounts_to_zoho(user)
+        # push_opening_balances_to_zoho(user)
         # push_items_to_zoho(user)
         # push_invoices_to_zoho(user)
         # push_receipts_to_zoho(user)
         # push_purchases_to_zoho(user)
-        # push_payments_to_zoho(user)
+        push_payments_to_zoho(user)
         # push_credit_notes_to_zoho(user)
         # push_debit_notes_to_zoho(user)  
         # push_expenses_to_zoho(user)
