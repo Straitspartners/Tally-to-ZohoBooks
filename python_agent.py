@@ -2005,7 +2005,7 @@ def sync_data(from_date, to_date):
 
         
         status_label.config(text="Syncing data to Django...", fg="blue")
-        messagebox.showinfo("Success", "Customers and Vendors synced successfully!")
+        messagebox.showinfo("Success", "Synced successfully!")
         status_label.config(text="✅ Sync complete!", fg="green")
 
     except Exception as e:
@@ -2021,7 +2021,7 @@ import json
 
 root = tk.Tk()
 root.title("Tally Sync Agent")
-root.geometry("380x300")
+root.geometry("380x360")
 root.resizable(False, False)
 
 title_label = tk.Label(root, text="Tally → Books Sync", font=("Arial", 16, "bold"))
@@ -2049,7 +2049,7 @@ fy_dropdown.pack()
 # Precautionary Note (like in Tally)
 precaution_label = tk.Label(
     root,
-    text="⚠️ Please ensure that the company you want to \nmigrate is open in Tally, \n& \n The selected financial year is active in Tally.",
+    text="⚠️ Please ensure that the company you want to \nmigrate is open in Tally, \n & \n The selected financial year is active in Tally.",
     fg="red",
     font=("Arial", 10, "bold"),
     justify="center"

@@ -462,14 +462,14 @@ class AccountSyncView(APIView):
             serializer = AccountSerializer(data=account_data)
 
             if serializer.is_valid():
-                account_code = account_data.get("account_code")
-                if not account_code:
-                    errors.append({"error": "Missing account_code in data", "data": account_data})
+                account_name = account_data.get("account_name")
+                if not account_name:
+                    errors.append({"error": "Missing account_name in data", "data": account_data})
                     continue
 
                 # Check for existing account with account_code
                 try:
-                    account_obj = Account.objects.get(user=request.user, account_code=account_code)
+                    account_obj = Account.objects.get(user=request.user, account_name=account_name)
                     # Update only if not yet fetched from tally
                     if not account_obj.fetched_from_tally:
                         # Update fields with validated data
@@ -1419,7 +1419,7 @@ def connect_zoho_books(request):
         return Response({"error": "Missing one or more required fields."}, status=400)
 
     # Attempt to get a new access token
-    token_url = "https://accounts.zoho.com/oauth/v2/token"
+    token_url = "https://accounts.zoho.in/oauth/v2/token"
     params = {
         "refresh_token": data["refresh_token"],
         "client_id": data["client_id"],
@@ -1452,7 +1452,7 @@ def connect_zoho_books(request):
     headers = {
         "Authorization": f"Zoho-oauthtoken {access_token}"
     }
-    test_url = f"https://books.zoho.com/api/v3/organizations?organization_id={data['organization_id']}"
+    test_url = f"https://books.zoho.in/api/v3/organizations?organization_id={data['organization_id']}"
     test_response = requests.get(test_url, headers=headers)
 
     if test_response.status_code == 200:
@@ -1782,7 +1782,7 @@ def push_opening_balances_to_zoho(user, opening_date="2024-04-01"):
         "accounts": accounts_payload
     }
     print("[Payload to Zoho]:", payload)
-    url = f"https://www.zohoapis.com/books/v3/settings/openingbalances?organization_id={org_id}"
+    url = f"https://www.zohoapis.in/books/v3/settings/openingbalances?organization_id={org_id}"
     headers = {
         "Authorization": f"Zoho-oauthtoken {access_token}",
         "Content-Type": "application/json"
@@ -2463,14 +2463,14 @@ def push_all_to_zoho(request):
     user = request.user
     try:
         # push_taxes_to_zoho(user)
-        push_bank_accounts_to_zoho(user)
+        # push_bank_accounts_to_zoho(user)
         # push_customers_to_zoho(user)
         # push_vendors_to_zoho(user)
         push_accounts_to_zoho(user)
         push_opening_balances_to_zoho(user)
         # push_items_to_zoho(user)
         # push_invoices_to_zoho(user)
-        push_receipts_to_zoho(user)
+        # push_receipts_to_zoho(user)
         # push_purchases_to_zoho(user)
         # push_payments_to_zoho(user)
         # push_credit_notes_to_zoho(user)

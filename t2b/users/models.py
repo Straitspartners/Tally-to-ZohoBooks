@@ -106,6 +106,8 @@ class Account(models.Model):
 
     def __str__(self):
         return self.account_name
+    class Meta:
+        unique_together = ('user', 'account_code','account_name')
     
 class Item(models.Model):
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, null=True)
