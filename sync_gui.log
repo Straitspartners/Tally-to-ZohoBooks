@@ -1,0 +1,1 @@
+2025-08-03 18:08:03,741:ERROR:Login failed: HTTPConnectionPool(host='127.0.0.1', port=8000): Max retries exceeded with url: /api/generate_token_agent/ (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x00000274313CBE00>: Failed to establish a new connection: [WinError 10061] No connection could be made because the target machine actively refused it'))

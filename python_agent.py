@@ -1984,28 +1984,28 @@ def sync_data(from_date, to_date):
             send_customers_to_django(customers)
         if vendors:
             send_vendors_to_django(vendors)
-        # if accounts:
-        #     send_coa_to_django(accounts)
-        # if items:
-        #     send_items_to_django(items)
-        # if invoices:
-        #   send_invoices_to_django(invoices)
-        # if receipts:
-        #   send_receipts_to_django(receipts)
-        # if purchases:
-        #   send_purchases_to_django(purchases)
-        # if payments:
-        #   send_payments_to_django(payments)
-        # if banks:
-        #   send_banks_to_django(banks)
-        # if credit_notes:
-        #   send_credit_notes_to_django(credit_notes)
-        # if debit_notes:
-        #   send_debit_notes_to_django(debit_notes)
-        # if expenses:
-        #   send_expenses_to_django(expenses)
-        # if journals:
-        #   send_journals_to_django(journals)
+        if accounts:
+            send_coa_to_django(accounts)
+        if items:
+            send_items_to_django(items)
+        if invoices:
+          send_invoices_to_django(invoices)
+        if receipts:
+          send_receipts_to_django(receipts)
+        if purchases:
+          send_purchases_to_django(purchases)
+        if payments:
+          send_payments_to_django(payments)
+        if banks:
+          send_banks_to_django(banks)
+        if credit_notes:
+          send_credit_notes_to_django(credit_notes)
+        if debit_notes:
+          send_debit_notes_to_django(debit_notes)
+        if expenses:
+          send_expenses_to_django(expenses)
+        if journals:
+          send_journals_to_django(journals)
 
         
         status_label.config(text="Syncing data to Django...", fg="blue")
