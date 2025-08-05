@@ -67,7 +67,7 @@ def push_bank_accounts_to_zoho(user):
     access_token, org_id = get_valid_zoho_access_token(user)
 
     banks = BankAccount.objects.filter(pushed_to_zoho=False)
-    url = f"https://www.zohoapis.com/books/v3/bankaccounts?organization_id={org_id}"
+    url = f"https://www.zohoapis.in/books/v3/bankaccounts?organization_id={org_id}"
     headers = {
         "Authorization": f"Zoho-oauthtoken {access_token}"
     }
@@ -184,7 +184,7 @@ def push_taxes_to_zoho(user):
     print("Access Token:", access_token)
     print("Org ID:", org_id)
 
-    base_url = "https://www.zohoapis.com/books/v3"
+    base_url = "https://www.zohoapis.in/books/v3"
     headers = {
         "Authorization": f"Zoho-oauthtoken {access_token}",
         "Content-Type": "application/json"
@@ -822,7 +822,7 @@ def push_credit_notes_to_zoho(user):
         "Content-Type": "application/json"
     }
 
-    base_url = "https://www.zohoapis.com/books/v3"
+    base_url = "https://www.zohoapis.in/books/v3"
     credit_notes = CreditNote.objects.filter(user=user, zoho_credit_note_id__isnull=True, pushed_to_zoho=False)
 
     for note in credit_notes:
@@ -922,7 +922,7 @@ def push_debit_notes_to_zoho(user):
         "Content-Type": "application/json"
     }
 
-    base_url = "https://www.zohoapis.com/books/v3"
+    base_url = "https://www.zohoapis.in/books/v3"
     debit_notes = DebitNote.objects.filter(user=user, zoho_debit_note_id__isnull=True, pushed_to_zoho=False)
 
     for note in debit_notes:
@@ -1367,7 +1367,7 @@ def sync_journals(request):
 
 def push_journals_to_zoho(user):
     access_token, org_id = get_valid_zoho_access_token(user)
-    base_url = "https://www.zohoapis.com/books/v3"
+    base_url = "https://www.zohoapis.in/books/v3"
     headers = {
         "Authorization": f"Zoho-oauthtoken {access_token}",
         "Content-Type": "application/json"
@@ -1447,7 +1447,7 @@ def send_to_zoho(ledger_data, access_token):
     }
 
     # Zoho Books API endpoint to create chart of accounts
-    url = "https://books.zoho.com/api/v3/chartofaccounts"
+    url = "https://books.zoho.in/api/v3/chartofaccounts"
 
     payload = {
         "name": ledger_data.get("name"),
@@ -1488,7 +1488,7 @@ def connect_zoho_books(request):
         return Response({"error": "Missing one or more required fields."}, status=400)
 
     # Attempt to get a new access token
-    token_url = "https://accounts.zoho.com/oauth/v2/token"
+    token_url = "https://accounts.zoho.in/oauth/v2/token"
     params = {
         "refresh_token": data["refresh_token"],
         "client_id": data["client_id"],
@@ -1521,7 +1521,7 @@ def connect_zoho_books(request):
     headers = {
         "Authorization": f"Zoho-oauthtoken {access_token}"
     }
-    test_url = f"https://books.zoho.com/api/v3/organizations?organization_id={data['organization_id']}"
+    test_url = f"https://books.zoho.in/api/v3/organizations?organization_id={data['organization_id']}"
     test_response = requests.get(test_url, headers=headers)
 
     if test_response.status_code == 200:
@@ -1586,7 +1586,7 @@ def push_customers_to_zoho(user):
     print("Org ID:", org_id)
 
     ledgers = Ledger.objects.filter(user=user,zoho_contact_id__isnull=True, pushed_to_zoho=False)
-    base_url = "https://www.zohoapis.com/books/v3"
+    base_url = "https://www.zohoapis.in/books/v3"
     headers = {
         "Authorization": f"Zoho-oauthtoken {access_token}",
         "Content-Type": "application/json"
@@ -1680,7 +1680,7 @@ def push_customers_to_zoho(user):
 #     print("Org ID:", org_id)
 
 #     accounts = Account.objects.filter(pushed_to_zoho=False)
-#     url = f"https://www.zohoapis.com/books/v3/chartofaccounts?organization_id={org_id}"
+#     url = f"https://www.zohoapis.in/books/v3/chartofaccounts?organization_id={org_id}"
 #     headers = {
 #         "Authorization": f"Zoho-oauthtoken {access_token}"
 #     }
@@ -1711,7 +1711,7 @@ def push_accounts_to_zoho(user):
     access_token, org_id = get_valid_zoho_access_token(user)
 
     accounts = Account.objects.filter(pushed_to_zoho=False)
-    post_url = f"https://www.zohoapis.com/books/v3/chartofaccounts?organization_id={org_id}"
+    post_url = f"https://www.zohoapis.in/books/v3/chartofaccounts?organization_id={org_id}"
     headers = {
         "Authorization": f"Zoho-oauthtoken {access_token}"
     }
@@ -1739,7 +1739,7 @@ def push_accounts_to_zoho(user):
             # Account already exists - try to fetch it
             print(f"[Info] Account '{account.account_name}' already exists. Attempting to fetch from Zoho...")
 
-            search_url = f"https://www.zohoapis.com/books/v3/chartofaccounts?organization_id={org_id}"
+            search_url = f"https://www.zohoapis.in/books/v3/chartofaccounts?organization_id={org_id}"
             fetch_response = requests.get(search_url, headers=headers)
             fetch_data = fetch_response.json()
 
@@ -1936,7 +1936,7 @@ def push_opening_balances_to_zoho(user):
         }
         print("[Payload to Zoho]:", payload)
 
-        url = f"https://www.zohoapis.com/books/v3/settings/openingbalances?organization_id={org_id}"
+        url = f"https://www.zohoapis.in/books/v3/settings/openingbalances?organization_id={org_id}"
         headers = {
             "Authorization": f"Zoho-oauthtoken {access_token}",
             "Content-Type": "application/json"
@@ -1961,7 +1961,7 @@ def push_vendors_to_zoho(user):
     print("Org ID:", org_id)
 
     vendors = Vendor.objects.filter(user=user,pushed_to_zoho=False)
-    base_url = "https://www.zohoapis.com/books/v3"
+    base_url = "https://www.zohoapis.in/books/v3"
     headers = {
         "Authorization": f"Zoho-oauthtoken {access_token}",
         "Content-Type": "application/json"
@@ -2043,7 +2043,7 @@ def push_vendors_to_zoho(user):
 
 def get_or_create_zoho_tax(rate, access_token, org_id):
     headers = {"Authorization": f"Zoho-oauthtoken {access_token}"}
-    tax_url = f"https://www.zohoapis.com/books/v3/settings/taxes?organization_id={org_id}"
+    tax_url = f"https://www.zohoapis.in/books/v3/settings/taxes?organization_id={org_id}"
 
     # Check existing taxes
     resp = requests.get(tax_url, headers=headers)
@@ -2066,7 +2066,7 @@ def push_items_to_zoho(user):
     access_token, org_id = get_valid_zoho_access_token(user)
 
     items = Item.objects.filter(user=user,pushed_to_zoho=False)
-    url = f"https://www.zohoapis.com/books/v3/items?organization_id={org_id}"
+    url = f"https://www.zohoapis.in/books/v3/items?organization_id={org_id}"
     headers = {
         "Authorization": f"Zoho-oauthtoken {access_token}",
         "Content-Type": "application/json"
@@ -2219,7 +2219,7 @@ def push_invoices_to_zoho(user):
         "Content-Type": "application/json"
     }
 
-    base_url = f"https://www.zohoapis.com/books/v3"
+    base_url = f"https://www.zohoapis.in/books/v3"
     invoices = Invoice.objects.filter(user=user, zoho_invoice_id__isnull=True, pushed_to_zoho=False)
 
     for invoice in invoices:
@@ -2335,7 +2335,7 @@ import json
 
 def push_receipts_to_zoho(user):
     access_token, org_id = get_valid_zoho_access_token(user)
-    base_url = "https://www.zohoapis.com/books/v3"
+    base_url = "https://www.zohoapis.in/books/v3"
     headers = {
         "Authorization": f"Zoho-oauthtoken {access_token}",
         "Content-Type": "application/json"
@@ -2409,7 +2409,7 @@ def push_purchases_to_zoho(user):
         "Content-Type": "application/json"
     }
 
-    base_url = f"https://www.zohoapis.com/books/v3"
+    base_url = f"https://www.zohoapis.in/books/v3"
     purchases = Purchase.objects.filter(user=user, zoho_bill_id__isnull=True, pushed_to_zoho=False)
 
     for purchase in purchases:
@@ -2497,7 +2497,7 @@ def push_purchases_to_zoho(user):
 
 def push_payments_to_zoho(user):
     access_token, org_id = get_valid_zoho_access_token(user)
-    base_url = "https://www.zohoapis.com/books/v3"
+    base_url = "https://www.zohoapis.in/books/v3"
     headers = {
         "Authorization": f"Zoho-oauthtoken {access_token}",
         "Content-Type": "application/json"
@@ -2563,7 +2563,7 @@ def push_payments_to_zoho(user):
 
 def push_expenses_to_zoho(user):
     access_token, org_id = get_valid_zoho_access_token(user)
-    base_url = "https://www.zohoapis.com/books/v3"
+    base_url = "https://www.zohoapis.in/books/v3"
     headers = {
         "Authorization": f"Zoho-oauthtoken {access_token}",
         "Content-Type": "application/json"
